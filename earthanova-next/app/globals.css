@@ -911,7 +911,8 @@ body:is([data-page="plans"],[data-page="profile"],[data-page="tracking"],[data-p
 .nasa-chart .g{stroke:rgba(255,255,255,.09);stroke-width:1}
 .nasa-chart .lbl{font-weight:600}
 .nasa-tbl{width:100%;font-size:.8rem}
-.nasa-tbl td,.nasa-tbl th{padding:5px 6px;text-align:left}
+.nasa-tbl td,.nasa-tbl th{padding:5px 6px;text-align:left;vertical-align:top}
+.nasa-tbl small{display:block;white-space:normal}
 .nasa-tbl small{color:#9fb7c6}
 .nasa-warn{color:#FFBE55;cursor:help}
 .nasa-cav{margin:6px 0 4px;padding-left:16px;font-size:.76rem;line-height:1.4;color:#FFBE55}

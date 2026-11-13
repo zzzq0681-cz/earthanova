@@ -290,7 +290,7 @@ export default function EarthanovaMarkup() {
                   <header className="card-h">
                     <h2 id="sumH"><i data-ic="bulb" />In plain words</h2>
                     <div className="right">
-                      <span className="tag">Updated from open data</span>
+                      <span className="tag">NASA open data</span>
                     </div>
                   </header>
                   <div id="sumBody" />
