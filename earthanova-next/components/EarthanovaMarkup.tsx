@@ -143,7 +143,7 @@ export default function EarthanovaMarkup() {
               </div>
               <h2 id="popTitle">Alexandria, Egypt</h2>
               <p className="coords mono" id="popCoords">31.20° N · 29.92° E</p>
-              <p className="sub" id="popSub">Climate: ERA5 grid cell (~25 km)</p>
+              <p className="sub" id="popSub">Climate: NASA POWER grid cell (~50 km)</p>
               <div className="field">
                 <label htmlFor="radius">Hazard search radius</label>
                 {" "}
@@ -220,7 +220,7 @@ export default function EarthanovaMarkup() {
                 <div className="sb-item">
                   <i data-ic="pulse" />
                   <div>
-                    <b id="sbSrc">ERA5 · CMIP6</b>
+                    <b id="sbSrc">NASA POWER</b>
                     <span>USGS · CAMS</span>
                   </div>
                 </div>
@@ -239,8 +239,8 @@ export default function EarthanovaMarkup() {
               </div>
               <h2>Scanning <span id="spName">Alexandria</span></h2>
               <ol className="sp-steps" id="spSteps">
-                <li data-k="era5">ERA5 climate record 2019–2025 <small>Open-Meteo</small></li>
-                <li data-k="cmip">CMIP6 projections 2026–2030 <small>4 models</small></li>
+                <li data-k="era5">NASA POWER climate record 2019–2025 <small>MERRA-2</small></li>
+                <li data-k="cmip">NASA climate projections <small>not loaded yet</small></li>
                 <li data-k="hazard">Hazards &amp; elevation <small>USGS · Copernicus DEM</small></li>
                 <li data-k="air">Air quality <small>CAMS</small></li>
                 <li data-k="img">Historical imagery <small>Esri Wayback</small></li>
@@ -338,14 +338,14 @@ export default function EarthanovaMarkup() {
                       <span className="ba-date" id="baAfterDate">Imagery —</span>
                     </div>
                   </div>
-                  <p className="ba-note" id="baNote">Imagery: Esri World Imagery Wayback (release dates). Climate: ERA5 reanalysis via Open-Meteo.</p>
+                  <p className="ba-note" id="baNote">Imagery: Esri World Imagery Wayback (release dates). Climate: NASA POWER (MERRA-2).</p>
                 </article>
                 <article className="card fc" data-views="basic advanced" aria-labelledby="fcH">
                   <header className="card-h">
                     <h2 id="fcH"><i data-ic="bars" />5-Year Outlook <small>annual mean temperature, °C</small></h2>
                     <div className="right">
-                      <span className="tag amber" title="CMIP6 HighResMIP models, bias-adjusted to ERA5 with the delta method. Projections are scenario-based, not weather forecasts.">
-                        CMIP6 projection · not a forecast
+                      <span className="tag amber" title="Scenario outlook (NASA NEX-GDDP-CMIP6, not loaded yet). Projections are scenario-based, not weather forecasts.">
+                        Scenario outlook · not a forecast
                       </span>
                     </div>
                   </header>
@@ -374,7 +374,7 @@ export default function EarthanovaMarkup() {
                         <thead>
                           <tr>
                             <th>Year</th>
-                            <th>Observed (ERA5)</th>
+                            <th>Observed (NASA POWER)</th>
                             <th>Model low</th>
                             <th>Ensemble mean</th>
                             <th>Model high</th>
@@ -408,6 +408,41 @@ export default function EarthanovaMarkup() {
                     </div>
                   </div>
                 </article>
+                <article className="card nasa" id="nasaCard" hidden data-views="basic advanced" aria-labelledby="nasaH">
+                  <header className="card-h">
+                    <h2 id="nasaH"><i data-ic="trend" />NASA time series &amp; 12-month forecast <small id="nasaSub" /></h2>
+                    <div className="right"><span className="tag" title="Monthly NASA POWER data (MERRA-2 / CERES), 1981 to 2025">NASA POWER</span></div>
+                  </header>
+                  <p className="nasa-head" id="nasaHead" />
+                  <div className="nasa-grid">
+                    <div className="nasa-charts">
+                      <h3>Annual mean temperature and trend</h3>
+                      <svg className="nasa-chart" id="nasaAnnual" role="img" aria-label="Annual mean temperature 1981 to 2025 with trend line" />
+                      <h3>Last 5 years and next 12 months (90% band)</h3>
+                      <svg className="nasa-chart" id="nasaMonthly" role="img" aria-label="Monthly temperature, last five years, with a 12 month forecast and uncertainty band" />
+                      <table className="sr-only" id="nasaFcTable">
+                        <caption>12-month temperature forecast</caption>
+                        <thead><tr><th>Month</th><th>Forecast °C</th><th>90% low</th><th>90% high</th></tr></thead>
+                        <tbody />
+                      </table>
+                    </div>
+                    <div className="nasa-side">
+                      <h3>Long-term trends</h3>
+                      <table className="tbl nasa-tbl" id="nasaTrends">
+                        <thead><tr><th>Variable</th><th>Per decade</th><th>p</th><th>Sig.</th></tr></thead>
+                        <tbody />
+                      </table>
+                      <ul className="nasa-cav" id="nasaCaveats" />
+                      <h3>How reliable is the forecast?</h3>
+                      <table className="tbl nasa-tbl" id="nasaRel">
+                        <thead><tr><th>Ahead</th><th>Baseline RMSE</th><th>ML RMSE</th><th>ML better</th></tr></thead>
+                        <tbody />
+                      </table>
+                      <p className="scen-note">Rolling backtest 2011–2025 (°C). The ML step only helps at short horizons; longer forecasts use the seasonal + trend baseline. Bands are approximate.</p>
+                      <div className="btn-row" id="nasaLinks" />
+                    </div>
+                  </div>
+                </article>
                 <article className="card kc" data-views="basic advanced" aria-labelledby="kcH">
                   <header className="card-h">
                     <h2 id="kcH"><i data-ic="bars" />Key Changes</h2>
@@ -430,7 +465,7 @@ export default function EarthanovaMarkup() {
                 </article>
                 <article className="card" data-views="advanced" aria-labelledby="advYearsH">
                   <header className="card-h">
-                    <h2 id="advYearsH"><i data-ic="bars" />Yearly record <small>ERA5 · calendar years, UTC</small></h2>
+                    <h2 id="advYearsH"><i data-ic="bars" />Yearly record <small>NASA POWER · calendar years</small></h2>
                   </header>
                   <div className="tbl-scroll" id="advYears" />
                 </article>

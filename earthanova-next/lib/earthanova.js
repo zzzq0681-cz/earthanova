@@ -2,6 +2,7 @@
  * It drives the server-rendered markup in components/EarthanovaMarkup.tsx imperatively,
  * and is loaded once, client-side only, by components/EarthanovaClient.tsx. */
 import Globe from 'globe.gl';
+import {nasaFind, nasaLoad, nasaBuildAnalysis, isStatic, reportUrl} from './nasa-data.js';
 
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -20,7 +21,7 @@ function makePeriod(start, end){
   return {start, end, years, baseYears, curYears, proj, projYears:proj ? yrs(end + 1, end + 5) : [], baseLabel:rng(baseYears), curLabel:rng(curYears), label:`${start}–${end}`};
 }
 const per = A => A.period || (A.period = Object.assign(makePeriod(2019, 2025), {proj:!!A.proj, projYears:[2026,2027,2028,2029,2030]}));
-const CACHE_VER = 'es:v3:';
+const CACHE_VER = 'es:v4-nasa:';
 
 /* ---------- icons ---------- */
 const P = {
@@ -87,8 +88,7 @@ const PRESETS = [
   {name:'Alexandria, Egypt', short:'Alexandria', lat:31.2, lon:29.92, featured:true},
   {name:'Cairo, Egypt', short:'Cairo', lat:30.04, lon:31.24},
   {name:'Riyadh, Saudi Arabia', short:'Riyadh', lat:24.71, lon:46.68},
-  {name:'Dubai, UAE', short:'Dubai', lat:25.2, lon:55.27},
-  {name:'Rotterdam, Netherlands', short:'Rotterdam', lat:51.92, lon:4.48}
+  {name:'Singapore', short:'Singapore', lat:1.35, lon:103.82}
 ].map(withId);
 function withId(l){ return {...l, lat:+(+l.lat).toFixed(4), lon:+(+l.lon).toFixed(4), id:`${(+l.lat).toFixed(2)},${(+l.lon).toFixed(2)}`}; }
 const uKey = k => `es:${k}:${S.user?.id || 'guest'}`;
@@ -150,7 +150,24 @@ async function reverseName(lat, lon){
   return null;
 }
 
-async function analyze(loc, radiusKm, onStep, period){
+/* Data policy: climate series come from NASA only (via the Earth Sentinel API). */
+async function analyze(loc, radiusKm, onStep, period){ return analyzeNasa(loc, radiusKm, onStep, period); }
+async function analyzeNasa(loc, radiusKm, onStep, period){
+  const hit = await nasaFind(loc.lat, loc.lon).catch(e => { onStep('era5', false); throw e; });
+  if(!hit.covered){
+    onStep('era5', false);
+    const e = new Error(`No NASA time series is loaded for this location yet (nearest loaded place: ${hit.place.name}, ${Math.round(hit.distance_km)} km away).`);
+    e.userFacing = true; throw e;
+  }
+  const bundle = await nasaLoad(hit.place.name).catch(e => { onStep('era5', false); throw e; });
+  onStep('era5', true, 'NASA POWER');
+  ['cmip', 'hazard', 'air'].forEach(k => onStep(k, true, 'not loaded yet'));
+  let img = null;
+  try{ img = await waybackPair(loc.lat, loc.lon, period); onStep('img', true); }catch{ onStep('img', false); }
+  return nasaBuildAnalysis(loc, radiusKm, bundle, img, period, hit, {mean, round, linreg});
+}
+/* Previous Open-Meteo / USGS implementation, no longer used for the climate record. */
+async function analyzeLegacy(loc, radiusKm, onStep, period){
   const q = `latitude=${loc.lat}&longitude=${loc.lon}`;
   const step = (k, p) => p.then(v => { onStep(k, true); return v; }, e => { onStep(k, false, e); throw e; });
   const era5P = step('era5', getJSON(`https://archive-api.open-meteo.com/v1/archive?${q}&start_date=${period.start}-01-01&end_date=${period.end}-12-31&daily=temperature_2m_mean,temperature_2m_max,precipitation_sum,shortwave_radiation_sum,soil_moisture_0_to_7cm_mean&timezone=UTC`, 40000));
@@ -560,7 +577,7 @@ function renderDashboardCore(){
   $('#baAfterVals').textContent = `${A.cur.temp?.toFixed(1) ?? '—'} °C · ${A.cur.rain ?? '—'} mm/yr`;
   $('#baBeforeDate').textContent = A.img?.before ? `Imagery ${A.img.before.date}` : 'Current imagery';
   $('#baAfterDate').textContent = A.img?.after ? `Imagery ${A.img.after.date}` : 'Current imagery';
-  $('#baNote').textContent = A.img ? (A.img.same ? 'No newer Wayback imagery for this tile in the chosen period — both panels show the same capture. Climate: ERA5 via Open-Meteo.' : 'Imagery: Esri World Imagery Wayback (release dates; capture may be earlier). Climate: ERA5 via Open-Meteo.') : 'Historical imagery unavailable — showing current imagery. Climate: ERA5 via Open-Meteo.';
+  $('#baNote').textContent = A.img ? (A.img.same ? 'No newer Wayback imagery for this tile in the chosen period — both panels show the same capture. Climate: NASA POWER.' : 'Imagery: Esri World Imagery Wayback (release dates; capture may be earlier). Climate: NASA POWER.') : 'Historical imagery unavailable — showing current imagery. Climate: NASA POWER.';
 
   // key changes
   const tiles = [
@@ -578,17 +595,91 @@ function renderDashboardCore(){
   $$('.scen-btn').forEach(b => { const k = b.dataset.s, v = A.proj?.[k]?.[4];
     b.disabled = !A.proj; b.querySelector('.dv').textContent = v == null ? '—' : `${v.toFixed(1)} °C`;
     b.setAttribute('aria-label', `${b.querySelector('.nm').textContent}: ${v == null ? 'unavailable' : v.toFixed(1)+' °C in '+(per(A).projYears[4] ?? '')}`); });
-  $('#scenNote').textContent = A.proj ? `Band: ${Object.keys(A.proj.models).length} CMIP6 models` : 'CMIP6 projections unavailable for this point.';
+  $('#scenNote').textContent = A.proj ? `Band: ${Object.keys(A.proj.models).length} CMIP6 models` : (A.nasa ? 'NASA NEX-GDDP-CMIP6 projections are not loaded yet. See the 12-month forecast below.' : 'CMIP6 projections unavailable for this point.');
   const rows = [...A.years.map(r => [r.year, r.temp, null, null, null]), ...per(A).projYears.map((y,i) => [y, null, A.proj?.low[i], A.proj?.mean[i], A.proj?.high[i]])];
   $('#fcTable tbody').innerHTML = rows.map(r => `<tr>${r.map(c => `<td>${c == null ? '—' : c}</td>`).join('')}</tr>`).join('');
   renderChart();
+  renderNasaPanel();
 
   // status bar
   const ageMin = Math.round((Date.now() - A.fetchedAt)/60000);
   $('#sbChip span').textContent = ageMin < 2 ? 'Data ready' : `Cached · ${ageMin < 60 ? ageMin+' min' : Math.round(ageMin/60)+' h'} ago`;
-  $('#sbSrc').textContent = A.proj ? 'ERA5 · CMIP6' : 'ERA5';
+  $('#sbSrc').textContent = A.nasa ? 'NASA POWER' : A.proj ? 'ERA5 · CMIP6' : 'ERA5';
   $('#locElev').textContent = A.elev != null ? `${Math.round(A.elev)} m` : '—';
   $('#locArea').textContent = `${A.radiusKm} km`;
+}
+
+/* ---------- NASA time series & forecast card ---------- */
+const median = a => { const v = a.filter(x => x != null).sort((x, y) => x - y), n = v.length; return n ? (n % 2 ? v[(n - 1) / 2] : (v[n / 2 - 1] + v[n / 2]) / 2) : null; };
+const NASA_LABEL = {annual_mean_temp:'Annual mean temperature', summer_JJA_mean_temp:'Summer (Jun–Aug) temperature', annual_mean_daily_max:'Mean daily maximum', annual_precip:'Annual precipitation', root_zone_wetness:'Root-zone soil wetness', solar_radiation:'Surface solar radiation'};
+function nasaSvg(svg, o){
+  const W = 560, H = 200, L = 40, R = 16, T = 12, B = 24, n = o.n;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  const all = [...o.lines.flatMap(l => l.y), ...(o.band ? [...o.band.lo, ...o.band.hi] : [])].filter(v => v != null);
+  const lo = Math.floor(Math.min(...all) - 0.3), hi = Math.ceil(Math.max(...all) + 0.3);
+  const X = i => L + i * (W - L - R) / (n - 1), Y = v => T + (hi - v) / (hi - lo) * (H - T - B);
+  const step = (hi - lo) > 12 ? 4 : (hi - lo) > 6 ? 2 : 1;
+  let g = '';
+  for(let t = Math.ceil(lo / step) * step; t <= hi; t += step) g += `<line class="g" x1="${L}" x2="${W - R}" y1="${Y(t)}" y2="${Y(t)}"/><text x="${L - 6}" y="${Y(t) + 4}" text-anchor="end">${t}°</text>`;
+  o.ticks.forEach(([i, lab]) => { g += `<text x="${X(i)}" y="${H - 6}" text-anchor="middle">${lab}</text>`; });
+  let body = '';
+  if(o.band){
+    const up = o.band.idx.map((i, k) => `${X(i).toFixed(1)} ${Y(o.band.hi[k]).toFixed(1)}`), dn = o.band.idx.map((i, k) => `${X(i).toFixed(1)} ${Y(o.band.lo[k]).toFixed(1)}`).reverse();
+    body += `<path d="M${up.join(' L')} L${dn.join(' L')} Z" fill="#FFBE55" fill-opacity=".2"/>`;
+  }
+  o.lines.forEach(l => {
+    const pts = l.x.map((i, k) => l.y[k] == null ? null : `${X(i).toFixed(1)} ${Y(l.y[k]).toFixed(1)}`).filter(Boolean);
+    body += `<path d="M${pts.join(' L')}" fill="none" stroke="${l.color}" stroke-width="${l.w || 2}"${l.dash ? ` stroke-dasharray="${l.dash}"` : ''} stroke-linejoin="round"/>`;
+    if(l.dots) body += l.x.map((i, k) => l.y[k] == null ? '' : `<circle cx="${X(i).toFixed(1)}" cy="${Y(l.y[k]).toFixed(1)}" r="2.6" fill="${l.color}"/>`).join('');
+  });
+  (o.labels || []).forEach(t => { body += `<text class="lbl" x="${X(t.i).toFixed(1)}" y="${(Y(t.v) + (t.dy ?? -8)).toFixed(1)}" text-anchor="${t.anchor || 'start'}" style="fill:${t.color}">${t.text}</text>`; });
+  svg.innerHTML = g + body;
+}
+function renderNasaPanel(){
+  const A = S.A, card = $('#nasaCard'); if(!card) return;
+  if(!A || !A.nasa){ card.hidden = true; return; }
+  card.hidden = false;
+  const b = A.nasa.bundle, s = b.series, T = b.trends.trends, tr = Object.fromEntries(T.map(t => [t.variable, t]));
+  const at = tr.annual_mean_temp, sm = tr.summer_JJA_mean_temp, y0 = s.month[0].slice(0, 4), y1 = s.month[s.month.length - 1].slice(0, 4);
+  $('#nasaSub').textContent = `${A.nasa.place.name} · NASA POWER ${y0}–${y1}`;
+  $('#nasaHead').innerHTML = `Long-term warming <b>${sgn(at.slope_per_decade, 2)} °C per decade</b> (${at.significant ? 'statistically significant' : 'not significant'}); summer <b>${sgn(sm.slope_per_decade, 2)} °C per decade</b>. Mann-Kendall test with Sen's slope on ${at.n_years} annual values.`;
+
+  // chart 1: annual mean temperature + Sen trend line
+  const yrs0 = [...new Set(s.month.map(m => +m.slice(0, 4)))];
+  const ann = yrs0.map(y => { const v = s.month.map((m, i) => +m.slice(0, 4) === y ? s.t2m[i] : null).filter(x => x != null); return v.length === 12 ? mean(v) : null; });
+  const slope = at.slope_per_decade / 10, ic0 = median(ann.map((v, i) => v == null ? null : v - slope * yrs0[i]));
+  const idx = yrs0.map((_, i) => i), tk = idx.filter(i => (yrs0[i] - yrs0[0]) % 10 === 0).map(i => [i, yrs0[i]]); tk.push([idx.length - 1, yrs0[idx.length - 1]]);
+  nasaSvg($('#nasaAnnual'), {n:idx.length, ticks:tk, lines:[
+    {x:idx, y:ann, color:'#cfe3ef', dots:true, w:1.8},
+    {x:[0, idx.length - 1], y:[ic0 + slope * yrs0[0], ic0 + slope * yrs0[idx.length - 1]], color:'#FFBE55', dash:'6 4', w:2}],
+    labels:[{i:idx.length - 1, v:ic0 + slope * yrs0[idx.length - 1], text:`trend ${sgn(at.slope_per_decade, 2)} °C/decade`, color:'#FFBE55', anchor:'end', dy:-10}]});
+
+  // chart 2: last 5 years (monthly) + next 12 months with 90% band
+  const fc = b.forecast.forecast, hist = 60, hm = s.month.slice(-hist), ht = s.t2m.slice(-hist), nF = fc.length;
+  const hx = hm.map((_, i) => i), fx = fc.map((_, i) => hist + i);
+  nasaSvg($('#nasaMonthly'), {n:hist + nF, ticks:[[0, hm[0]], [24, hm[24]], [48, hm[48]], [hist + nF - 1, fc[nF - 1].month]], lines:[
+    {x:hx, y:ht, color:'#22D3EE', w:1.8},
+    {x:[hist - 1, ...fx], y:[ht[hist - 1], ...fc.map(r => r.value)], color:'#FFBE55', w:2.2}],
+    band:{idx:fx, lo:fc.map(r => r.lo90), hi:fc.map(r => r.hi90)},
+    labels:[{i:hist + nF - 1, v:fc[nF - 1].value, text:`${fc[nF - 1].value.toFixed(1)} °C`, color:'#FFBE55', anchor:'end', dy:-14}]});
+  $('#nasaFcTable tbody').innerHTML = fc.map(r => `<tr><td>${r.month}</td><td>${r.value.toFixed(1)}</td><td>${r.lo90.toFixed(1)}</td><td>${r.hi90.toFixed(1)}</td></tr>`).join('');
+
+  // trends table + caveats
+  const order = ['annual_mean_temp', 'summer_JJA_mean_temp', 'annual_mean_daily_max', 'annual_precip', 'root_zone_wetness', 'solar_radiation'];
+  $('#nasaTrends tbody').innerHTML = order.filter(k => tr[k]).map(k => { const t = tr[k];
+    return `<tr><td>${NASA_LABEL[k]}${t.caveat ? ` <span class="nasa-warn" title="${esc(t.caveat)}" aria-label="caution">⚠</span>` : ''}</td><td>${sgn(t.slope_per_decade, 3)} <small>${esc(t.unit.replace('degC/decade', '°C/decade'))}</small></td><td>${t.p_value < 0.001 ? '&lt;0.001' : t.p_value.toFixed(3)}</td><td>${t.significant ? 'yes' : 'no'}</td></tr>`; }).join('');
+  const cav = T.filter(t => t.caveat);
+  $('#nasaCaveats').innerHTML = cav.map(t => `<li><b>${NASA_LABEL[t.variable] || t.variable}:</b> ${esc(t.caveat)}</li>`).join('');
+
+  // reliability from the rolling backtest
+  const bt = b.backtest.results, hs = [...new Set(bt.map(r => r.horizon))];
+  $('#nasaRel tbody').innerHTML = hs.map(h => { const f = m => bt.find(r => r.horizon === h && r.model === m), ml = f('ridge_resid');
+    return `<tr><td>${h} mo</td><td>${f('clim_trend').rmse.toFixed(2)}</td><td>${ml.rmse.toFixed(2)}</td><td>${ml.ridge_significant ? 'yes' : 'no'}</td></tr>`; }).join('');
+
+  // server-side report links (need the live API; not available in a static preview)
+  const nm = A.nasa.place.name;
+  $('#nasaLinks').innerHTML = isStatic() ? `<span class="muted">PDF and CSV reports are generated by the NASA data service (not available in this offline preview).</span>`
+    : `<a class="btn-secondary" href="${reportUrl(nm, 'pdf')}" download>${ic('file')}PDF report</a> <a class="btn-secondary" href="${reportUrl(nm, 'csv')}" download>${ic('download')}CSV data</a>`;
 }
 
 function renderDashboard(){
@@ -627,11 +718,11 @@ function renderAdvanced(){
     <div><span>Linear trend ${per(A).label}</span><b>${tr ? sgn(tr.slope,2) + ' °C/yr' : 'n/a'}</b></div>
     <div><span>Regression t (n=${tr ? tr.n : '—'})</span><b>${tr ? (Math.abs(tr.t) > 999 ? (tr.t > 0 ? '> 999' : '< −999') : tr.t.toFixed(2)) : 'n/a'}</b></div>
     <div><span>Significance (95%)</span><b>${tr ? (tr.sig ? 'Significant' : 'Not significant') : 'n/a'}</b></div>
-    <div><span>ERA5 grid cell</span><b class="mono">${A.grid.lat.toFixed(2)}, ${A.grid.lon.toFixed(2)}</b></div>
+    <div><span>${A.nasa ? 'NASA grid point' : 'ERA5 grid cell'}</span><b class="mono">${A.grid.lat.toFixed(2)}, ${A.grid.lon.toFixed(2)}</b></div>
     <div><span>Elevation (DEM)</span><b>${A.elev != null ? Math.round(A.elev) + ' m' : 'n/a'}</b></div>
     <div><span>PM2.5 mean (90 d)</span><b>${A.aq ? A.aq.pm25 + ' µg/m³' : 'n/a'}</b></div></div>
     <p>${tr ? `Ordinary least squares on ${tr.n} annual means: ${tr.sig ? 'the slope is significant at the 95% level.' : 'the slope is not significant at the 95% level, so treat it as directional.'}` : ''} Baseline (${per(A).baseLabel}) and current (${per(A).curLabel}) windows differ in length (${per(A).baseYears.length} vs ${per(A).curYears.length} years). Hot-day threshold ${A.hotBase} °C. Fetched ${new Date(A.fetchedAt).toISOString().replace('T',' ').slice(0,16)} UTC.</p>`;
-  const r = A.years.map(y => `<tr><td>${y.year}</td><td>${y.temp?.toFixed(2) ?? '—'}</td><td>${y.rain ?? '—'}</td><td>${y.hot}</td><td>${y.soil ?? '—'}</td><td>${y.solar?.toFixed(2) ?? '—'}</td></tr>`).join('');
+  const r = A.years.map(y => `<tr><td>${y.year}</td><td>${y.temp?.toFixed(2) ?? '—'}</td><td>${y.rain ?? '—'}</td><td>${y.hot ?? '—'}</td><td>${y.soil ?? '—'}</td><td>${y.solar?.toFixed(2) ?? '—'}</td></tr>`).join('');
   const row = (lbl, o) => `<tr class="avg"><td>${lbl}</td><td>${o.temp?.toFixed(2) ?? '—'}</td><td>${o.rain ?? '—'}</td><td>${o.hot ?? '—'}</td><td>${o.soil ?? '—'}</td><td>${o.solar?.toFixed(2) ?? '—'}</td></tr>`;
   $('#advYears').innerHTML = `<table class="tbl"><thead><tr><th>Year</th><th>Mean temp °C</th><th>Rain mm</th><th>Days ≥ ${A.hotBase} °C</th><th>Soil m³/m³</th><th>Solar kWh/m²/d</th></tr></thead><tbody>${r}${row('Avg ' + per(A).baseLabel, A.base)}${row('Avg ' + per(A).curLabel, A.cur)}</tbody></table>`;
   if(A.proj){
@@ -643,7 +734,7 @@ function renderAdvanced(){
   $('#advHaz').innerHTML = `<table class="tbl"><thead><tr><th>Tower</th><th>Level</th><th>Score</th><th class="l">Finding</th></tr></thead><tbody>${towers}</tbody></table>
     <h3>Earthquakes M4+ within ${A.radiusKm} km, ${per(A).label}</h3>${A.quakes ? (quakes ? `<table class="tbl"><thead><tr><th>Date</th><th>Mag</th><th class="l">Place</th><th>Distance</th></tr></thead><tbody>${quakes}</tbody></table>` : '<div class="empty">None recorded.</div>') : '<div class="empty">USGS data unavailable.</div>'}`;
   $('#advExport').innerHTML = `<div class="btn-row"><button class="btn-primary" data-act="report-quick">${ic('file')}Save as report</button><button class="btn-secondary" data-act="csv">${ic('download')}Download CSV</button></div>
-    <p>Sources: ERA5 reanalysis (ECMWF / Copernicus) and CMIP6 via Open-Meteo; USGS Earthquake Catalog; Copernicus DEM; CAMS air quality; Esri World Imagery Wayback. Grid values (~25 km) can differ from station records. Screening rules are simple thresholds, not an official assessment.</p>`;
+    <p>Sources: ${A.nasa ? 'NASA POWER (MERRA-2 / CERES) monthly data; Esri World Imagery Wayback. Grid values (~50 km) can differ from station records.' : 'ERA5 reanalysis (ECMWF / Copernicus) and CMIP6 via Open-Meteo; USGS Earthquake Catalog; Copernicus DEM; CAMS air quality; Esri World Imagery Wayback. Grid values (~25 km) can differ from station records.'} Screening rules are simple thresholds, not an official assessment.</p>`;
 }
 
 /* Playful: quizzes and games */
@@ -748,7 +839,7 @@ function renderChart(){
   const lastObs = obs[obs.length-1];
   const labels = [];
   let dots = OBS_YEARS.map((y,i) => obs[i] == null ? '' : `<circle class="dot" r="4" cx="${X(y)}" cy="${Y(obs[i])}" style="fill:#cfe3ef"/>`).join('');
-  labels.push(`<text class="lbl" x="${X(OBS_YEARS[0])}" y="${Math.max(T+10, Y(Math.max(...obs.filter(v=>v!=null))) - 10)}">ERA5 observed</text>`);
+  labels.push(`<text class="lbl" x="${X(OBS_YEARS[0])}" y="${Math.max(T+10, Y(Math.max(...obs.filter(v=>v!=null))) - 10)}">${A.nasa ? 'NASA POWER' : 'ERA5'} observed</text>`);
   if(A.proj){
     const band = `M${X(LO)} ${Y(lastObs)} ` + PROJ_YEARS.map((y,i) => `L${X(y)} ${Y(A.proj.high[i])}`).join(' ') + ' ' + [...PROJ_YEARS].reverse().map((y,i) => `L${X(y)} ${Y(A.proj.low[4-i])}`).join(' ') + ' Z';
     $('#fcBand').setAttribute('d', band);
@@ -769,7 +860,7 @@ function chartHover(e){
   const v = oi >= 0 ? A.years[oi].temp : A.proj[S.scenario][pi]; if(v == null) return;
   const xh = $('#fcXh'); xh.setAttribute('x1', X(yr)); xh.setAttribute('x2', X(yr)); xh.setAttribute('y1', T); xh.setAttribute('y2', H-B); xh.style.opacity = .8;
   const tip = $('#fcTip'); tip.style.left = X(yr)+'px'; tip.style.top = (Y(v)-6)+'px'; tip.style.opacity = 1;
-  tip.innerHTML = oi >= 0 ? `<span>${yr} · ERA5 observed</span><br><b>${v.toFixed(2)} °C</b>` : `<span>${yr} · CMIP6 ${S.scenario === 'mean' ? 'ensemble mean' : 'model '+S.scenario}</span><br><b>${v.toFixed(2)} °C</b> <span>range ${A.proj.low[pi].toFixed(1)}–${A.proj.high[pi].toFixed(1)}</span>`;
+  tip.innerHTML = oi >= 0 ? `<span>${yr} · ${S.A?.nasa ? 'NASA POWER' : 'ERA5'} observed</span><br><b>${v.toFixed(2)} °C</b>` : `<span>${yr} · CMIP6 ${S.scenario === 'mean' ? 'ensemble mean' : 'model '+S.scenario}</span><br><b>${v.toFixed(2)} °C</b> <span>range ${A.proj.low[pi].toFixed(1)}–${A.proj.high[pi].toFixed(1)}</span>`;
 }
 $('#fcHit').addEventListener('pointermove', chartHover);
 $('#fcHit').addEventListener('pointerleave', () => { $('#fcTip').style.opacity = 0; $('#fcXh').style.opacity = 0; });
@@ -839,7 +930,7 @@ function select(l){
   S.token++; S.loc = withId(l);
   if(S.page !== 'home') setPage('home');
   fillLocation(); setState('selected');
-  $('#popSub').textContent = 'Climate: ERA5 grid cell (~25 km). Hazards: within radius.';
+  $('#popSub').textContent = 'Climate: NASA POWER grid cell (~50 km).';
   announce(`${S.loc.name} selected. Press Scan Area to analyse.`);
   setTimeout(() => $('#scanBtn').focus({preventScroll:true}), 400);
 }
@@ -882,8 +973,8 @@ async function scan(force = false){
   const lis = Object.fromEntries($$('#spSteps li').map(li => [li.dataset.k, li])); Object.values(lis).forEach(li => { li.className = 'on'; });
   $('#sbChip').className = 'chip info'; $('#sbChip span').textContent = 'Scanning';
   const key = `${CACHE_VER}${l.id}:${radius}:${period.start}-${period.end}`, cached = !force && store.get(key, null), fresh = cached && Date.now() - cached.fetchedAt < 7*864e5;
-  lis.era5.firstChild.textContent = `ERA5 climate record ${period.label} `;
-  lis.cmip.firstChild.textContent = period.proj ? `CMIP6 projections ${rng(period.projYears)} ` : 'CMIP6 projections (only when the period ends last year) ';
+  lis.era5.firstChild.textContent = `NASA POWER climate record ${period.label} `;
+  lis.cmip.firstChild.textContent = 'NASA climate projections ';
   let done = 0; const t0 = performance.now(), minT = REDUCED ? 300 : fresh ? 1300 : 2200;
   const fg = $('#spFg'), pctEl = $('#spPct');
   (function tick(){ if(token !== S.token || S.state !== 'scanning') return;
@@ -893,13 +984,13 @@ async function scan(force = false){
   if(fresh){ A = {...cached, loc:l}; $('#spNote').textContent = 'Loaded from local cache (refresh from the status bar).';
     for(const k of STEP_KEYS){ await sleep(minT / 7); if(token !== S.token) return; lis[k].className = 'done'; done++; } }
   else {
-    $('#spNote').textContent = 'Fetching open datasets for this point…';
+    $('#spNote').textContent = 'Fetching NASA time series for this point…';
     try{
-      A = await analyze(l, radius, (k, ok) => { if(token !== S.token) return; lis[k].className = ok ? 'done' : 'fail'; if(!ok) lis[k].querySelector('small').textContent = 'unavailable'; done++; }, period);
+      A = await analyze(l, radius, (k, ok, note) => { if(token !== S.token) return; lis[k].className = ok ? 'done' : 'fail'; const sm = lis[k].querySelector('small'); if(!ok) sm.textContent = 'unavailable'; else if(typeof note === 'string') sm.textContent = note; done++; }, period);
       store.set(key, A);
     }catch(e){
       if(token !== S.token) return;
-      sp.classList.add('has-error'); $('#spErrMsg').textContent = `${e.message || 'Request failed.'} Check your internet connection and try again.`;
+      sp.classList.add('has-error'); $('#spErrMsg').textContent = `${e.message || 'Request failed.'}${e.userFacing ? ' Try Alexandria, Cairo, Riyadh or Singapore.' : ' Check your internet connection and try again.'}`;
       $('#sbChip').className = 'chip bad'; $('#sbChip span').textContent = 'Error'; announce('Scan failed. ' + (e.message || '')); return;
     }
   }
@@ -965,7 +1056,7 @@ function saveReport(title, notes, sections){
 function csvText(A, loc){
   const rows = [['location', loc.name], ['latitude', loc.lat], ['longitude', loc.lon], ['era5_grid', `${A.grid.lat},${A.grid.lon}`], ['fetched', new Date(A.fetchedAt).toISOString()], [],
     ['year','source','mean_temp_c','rain_mm','hot_days','soil_m3m3','solar_kwh_m2_day','model_low_c','ensemble_mean_c','model_high_c']];
-  A.years.forEach(y => rows.push([y.year,'ERA5',y.temp,y.rain,y.hot,y.soil,y.solar,'','','']));
+  A.years.forEach(y => rows.push([y.year,A.nasa ? 'NASA POWER' : 'ERA5',y.temp,y.rain,y.hot,y.soil,y.solar,'','','']));
   if(A.proj) per(A).projYears.forEach((y,i) => rows.push([y,'CMIP6','','','','','',A.proj.low[i],A.proj.mean[i],A.proj.high[i]]));
   return rows.map(r => r.map(c => /[",\n]/.test(String(c ?? '')) ? `"${String(c).replace(/"/g,'""')}"` : (c ?? '')).join(',')).join('\n');
 }
@@ -976,22 +1067,22 @@ function downloadCSV(A, loc){
 function reportHTML(rep, autoPrint){
   const A = rep.A, loc = rep.loc, I = interpret(A), H = hazardReadings(A, I), has = k => rep.sections.includes(k);
   const d = new Date(A.fetchedAt).toISOString().replace('T',' ').slice(0,16);
-  const tr = A.years.map(y => `<tr><td>${y.year}</td><td>${y.temp?.toFixed(2) ?? '—'}</td><td>${y.rain ?? '—'}</td><td>${y.hot}</td><td>${y.soil ?? '—'}</td><td>${y.solar?.toFixed(2) ?? '—'}</td></tr>`).join('');
+  const tr = A.years.map(y => `<tr><td>${y.year}</td><td>${y.temp?.toFixed(2) ?? '—'}</td><td>${y.rain ?? '—'}</td><td>${y.hot ?? '—'}</td><td>${y.soil ?? '—'}</td><td>${y.solar?.toFixed(2) ?? '—'}</td></tr>`).join('');
   const pr = A.proj ? per(A).projYears.map((y,i) => `<tr><td>${y}</td><td>${A.proj.low[i].toFixed(2)}</td><td>${A.proj.mean[i].toFixed(2)}</td><td>${A.proj.high[i].toFixed(2)}</td></tr>`).join('') : '';
   const tw = HAZARDS.map(h => `<tr><td>${h.code} ${h.name}</td><td>${LEVEL[H[h.id].level][0]}</td><td style="text-align:left">${esc(H[h.id].headline)}</td></tr>`).join('');
   const author = S.user ? `${esc(S.user.name)} (${esc(roleOf(S.user.role).label)})` : 'Earthanova user';
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${esc(rep.title)}</title><style>body{font:14px/1.5 Inter,system-ui,sans-serif;color:#0b1b2b;max-width:860px;margin:32px auto;padding:0 24px}h1{font:700 26px Sora,system-ui;margin:0}h2{font:600 17px Sora,system-ui;margin:26px 0 8px;border-bottom:2px solid #22D3EE;padding-bottom:4px}table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}td,th{border-bottom:1px solid #d6e2ea;padding:6px 8px;text-align:right}td:first-child,th:first-child{text-align:left}th{color:#45627a;font-weight:600}.muted{color:#45627a}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.box{border:1px solid #d6e2ea;border-radius:10px;padding:10px 12px}.box b{display:block;font-size:18px}ul{padding-left:18px}.notes{white-space:pre-wrap;background:#f1f7fa;border-radius:10px;padding:10px 12px}@media print{.noprint{display:none}}</style></head><body>
   <p class="noprint"><button onclick="print()">Print / Save as PDF</button></p>
-  <h1>${esc(rep.title)}</h1><p class="muted">${esc(loc.name)} · ${fmtLat(loc.lat)}, ${fmtLon(loc.lon)} · ERA5 grid ${A.grid.lat.toFixed(2)}, ${A.grid.lon.toFixed(2)} · elevation ${A.elev != null ? Math.round(A.elev) + ' m' : 'n/a'}<br>Prepared by ${author} on ${new Date(rep.createdAt).toLocaleDateString()} · data fetched ${d} UTC</p>
+  <h1>${esc(rep.title)}</h1><p class="muted">${esc(loc.name)} · ${fmtLat(loc.lat)}, ${fmtLon(loc.lon)} · ${A.nasa ? 'NASA POWER' : 'ERA5'} grid ${A.grid.lat.toFixed(2)}, ${A.grid.lon.toFixed(2)} · elevation ${A.elev != null ? Math.round(A.elev) + ' m' : 'n/a'}<br>Prepared by ${author} on ${new Date(rep.createdAt).toLocaleDateString()} · data fetched ${d} UTC</p>
   ${rep.notes ? `<h2>Notes</h2><p class="notes">${esc(rep.notes)}</p>` : ''}
   ${has('summary') ? `<h2>Summary</h2><div class="grid"><div class="box">Temperature change<b>${sgn(I.dT)} °C</b><span class="muted">${per(A).baseLabel} → ${per(A).curLabel}</span></div><div class="box">Rainfall change<b>${I.dRain == null ? 'n/a' : sgn(I.dRain,0) + '%'}</b><span class="muted">${A.base.rain ?? '—'} → ${A.cur.rain ?? '—'} mm/yr</span></div><div class="box">Trend<b>${A.trend ? sgn(A.trend.slope,2) + ' °C/yr' : 'n/a'}</b><span class="muted">${A.trend ? (A.trend.sig ? 'significant (95%)' : 'not significant') : ''}</span></div></div>
     <h2>Indicators</h2><ul><li>Solar: ${esc(I.hi.solar[0])} (${esc(I.hi.solar[2])})</li><li>Climate: ${esc(I.hi.climate[0])} (${esc(I.hi.climate[2])})</li><li>Air quality: ${esc(I.hi.air[0])} (${esc(I.hi.air[2])})</li></ul>
     <h2>Screening flags</h2>${I.flags.length ? `<ul>${I.flags.map(f => `<li>${esc(f.t)}</li>`).join('')}</ul>` : '<p>No thresholds exceeded.</p>'}` : ''}
   ${has('towers') ? `<h2>Risk tower results</h2><table><thead><tr><th>Tower</th><th>Level</th><th style="text-align:left">Finding</th></tr></thead><tbody>${tw}</tbody></table>` : ''}
-  ${has('years') ? `<h2>Yearly record (ERA5)</h2><table><thead><tr><th>Year</th><th>Mean °C</th><th>Rain mm</th><th>Days ≥ ${A.hotBase} °C</th><th>Soil m³/m³</th><th>Solar kWh/m²/d</th></tr></thead><tbody>${tr}</tbody></table>` : ''}
+  ${has('years') ? `<h2>Yearly record (${A.nasa ? 'NASA POWER' : 'ERA5'})</h2><table><thead><tr><th>Year</th><th>Mean °C</th><th>Rain mm</th><th>Days ≥ ${A.hotBase} °C</th><th>Soil m³/m³</th><th>Solar kWh/m²/d</th></tr></thead><tbody>${tr}</tbody></table>` : ''}
   ${has('projection') && A.proj ? `<h2>Projection ${rng(per(A).projYears)} (CMIP6, bias-adjusted)</h2><table><thead><tr><th>Year</th><th>Model low</th><th>Ensemble mean</th><th>Model high</th></tr></thead><tbody>${pr}</tbody></table>` : ''}
   ${has('hazards') ? `<h2>Earthquakes M4+ within ${A.radiusKm} km, ${per(A).label}</h2>${A.quakes ? (A.quakes.list.length ? `<table><thead><tr><th>Date</th><th>Magnitude</th><th>Place</th><th>Distance</th></tr></thead><tbody>${A.quakes.list.slice(0,15).map(e => `<tr><td>${new Date(e.time).toISOString().slice(0,10)}</td><td>${e.mag.toFixed(1)}</td><td style="text-align:left">${esc(e.place)}</td><td>${e.dist} km</td></tr>`).join('')}</tbody></table>` : '<p>None recorded.</p>') : '<p>Unavailable.</p>'}` : ''}
-  <h2>Sources &amp; limitations</h2><p class="muted">ERA5 reanalysis (Copernicus/ECMWF) and CMIP6 HighResMIP via Open-Meteo; USGS Earthquake Catalog; CAMS air quality; Copernicus DEM; Esri World Imagery Wayback. Grid-cell values (~25 km) may differ from station records. Screening rules are simple thresholds and not an official assessment. Projections are scenario-based, not forecasts.</p>
+  <h2>Sources &amp; limitations</h2><p class="muted">${A.nasa ? 'NASA POWER (MERRA-2 / CERES) monthly data; Esri World Imagery Wayback. Grid-cell values (~50 km) may differ' : 'ERA5 reanalysis (Copernicus/ECMWF) and CMIP6 HighResMIP via Open-Meteo; USGS Earthquake Catalog; CAMS air quality; Copernicus DEM; Esri World Imagery Wayback. Grid-cell values (~25 km) may differ'} from station records. Screening rules are simple thresholds and not an official assessment. Projections are scenario-based, not forecasts.</p>
   ${autoPrint ? '<script>addEventListener("load",()=>setTimeout(()=>print(),400))<\/script>' : ''}</body></html>`;
 }
 function openReport(rep, autoPrint){

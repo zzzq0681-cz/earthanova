@@ -3,7 +3,7 @@ import "./globals.css";
 
 const title = "Earthanova — Explore Earth. Understand change.";
 const description =
-  "Earthanova: click anywhere on Earth and analyse real open climate data (ERA5, CMIP6), hazards (USGS) and air quality (CAMS).";
+  "Earthanova: click a place on Earth and explore NASA time series, temperature trends and a 12-month forecast.";
 
 export const metadata: Metadata = {
   title,
