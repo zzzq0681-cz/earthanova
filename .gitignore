@@ -1,0 +1,28 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Dependencies & builds
+node_modules/
+dist/
+build/
+.vite/
+.next/
+.cache/
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Editors
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
