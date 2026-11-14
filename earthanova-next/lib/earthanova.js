@@ -3,7 +3,8 @@
  * and is loaded once, client-side only, by components/EarthanovaClient.tsx. */
 import Globe from 'globe.gl';
 import {towerViz, renderChart as renderHzChart, wireCharts as wireHzCharts} from './hazard-charts.js';
-import {eonetEvents, nasaHazards, nasaWindow, nasaFind, nasaEnsure, nasaLoad, nasaBuildAnalysis, isStatic, reportUrl} from './nasa-data.js';
+import {buildPlan, bestTimeHtml, riskCalendarHtml, eonetByMonth, wirePlanner} from './compare-planner.js';
+import {eonetEvents, nasaHazards, nasaWindow, nasaClimateYear, nasaFind, nasaEnsure, nasaLoad, nasaBuildAnalysis, isStatic, reportUrl} from './nasa-data.js';
 
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1563,7 +1564,7 @@ async function runCompare(){
   const win = {start:CMP.start, end:CMP.end}; $('#cmpOut').innerHTML = '<div class="card cmp-load"><div class="spinner"></div><p>Comparing NASA climate, dust and earthquake history for both places. A new place can take 1-2 minutes the first time…</p></div>';
   try{
     const [a, b] = await Promise.all([placeData(CMP.from, win), placeData(CMP.to, win)]);
-    CMP.res = {a, b, win, purpose:CMP.purpose, pref:CMP.pref, at:Date.now()}; showCompare(CMP.res);
+    CMP.res = {a, b, win, purpose:CMP.purpose, pref:CMP.pref, at:Date.now()}; PL.cache = {}; PL.sel = 'to'; showCompare(CMP.res);
   }catch(ex){ $('#cmpOut').innerHTML = ''; err.textContent = (ex.message || 'Comparison failed.') + ' Check your connection and try again.'; }
 }
 function showCompare(r){
@@ -1579,9 +1580,36 @@ function showCompare(r){
     <div class="card"><div class="tbl-scroll"><table class="tbl cmp-tbl"><thead><tr><th></th><th>${esc(a.loc.short)} <small>(from)</small></th><th>${esc(b.loc.short)} <small>(to)</small></th></tr></thead><tbody>${rows}</tbody></table></div><p class="muted">Climate values are averages for the same dates over ${LAST_YEAR - 4}–${LAST_YEAR} (NASA POWER daily; rain from NASA GPM IMERG when the place is stored, otherwise POWER), so they describe what is typical, not a forecast${a.fcast || b.fcast ? ' (the short forecast shown is from Open-Meteo, not NASA)' : ''}. Dust is the natural part of airborne particles from NASA MERRA-2; earthquakes are from USGS. A check mark means clearly better.</p></div>
     <div class="cmp-notes">${v.flags.length ? `<section class="card"><h3>${ic('alert')}Watch out</h3><ul class="notes">${li(v.flags, 'alert', 'bad')}</ul></section>` : ''}${(v.pros.length || v.cons.length) ? `<section class="card"><h3>${ic('compare')}Why</h3><ul class="notes">${li(v.pros, 'check', 'good')}${li(v.cons, 'alert', 'bad')}</ul></section>` : ''}${v.tips.length ? `<section class="card"><h3>${ic('bulb')}Tips for ${esc(b.loc.short)}</h3><ul class="notes">${li(v.tips, 'bulb', '')}</ul></section>` : ''}</div>
     <div class="btn-row"><button class="btn-primary" data-act="cmp-open">${ic('scan')}Open ${esc(b.loc.short)} dashboard</button><button class="btn-secondary" data-act="cmp-track">${ic('pulse')}Track ${esc(b.loc.short)} hazards</button></div>
+    <div class="pl-root" id="cmpPlan"></div>
     <p class="muted foot">This is general guidance from open climate data, not a safety guarantee. Always check official travel advisories, visa rules and current local conditions before you decide.</p>`;
+  loadPlanner(r);
 }
 
+/* ---------- compare: best time to go + seasonal risk calendar ---------- */
+const PL = {sel:'to', cache:{}, tok:0};
+async function loadPlanner(r){
+  const host = $('#cmpPlan'); if(!host) return;
+  const tok = ++PL.tok, place = PL.sel === 'from' ? r.a.loc : r.b.loc;
+  const sw = `<div class="pl-switch" role="group" aria-label="Place to analyse"><span>Analyse:</span><button type="button" class="chip-opt" data-pl-sel="from" aria-pressed="${PL.sel === 'from'}">${esc(r.a.loc.short)} <small>(from)</small></button><button type="button" class="chip-opt" data-pl-sel="to" aria-pressed="${PL.sel === 'to'}">${esc(r.b.loc.short)} <small>(to)</small></button></div>`;
+  host.innerHTML = `${sw}<div class="card cmp-load"><div class="spinner"></div><p>Loading the year of NASA climate for ${esc(place.short)}. A new place can take a minute…</p></div>`;
+  try{
+    let pk = PL.cache[place.id];
+    if(!pk){
+      const [prof, eo] = await Promise.allSettled([nasaClimateYear(place.lat, place.lon), eonetEvents(place.lat, place.lon, 300, {start:LAST_YEAR - 9, end:LAST_YEAR})]);
+      if(prof.status !== 'fulfilled') throw prof.reason;
+      pk = PL.cache[place.id] = {profile:prof.value, eo:eonetByMonth(eo.status === 'fulfilled' ? eo.value : null)};
+    }
+    if(tok !== PL.tok) return;
+    const days = Math.max(1, Math.round((new Date(r.win.end) - new Date(r.win.start)) / 864e5) + 1);
+    const plan = buildPlan(pk.profile, {range:PREF[r.pref].slice(0, 2), purpose:r.purpose, lenWeeks:r.purpose === 'trip' ? Math.max(1, Math.min(13, Math.round(days / 7))) : 4, win:r.win});
+    const tips = {};
+    host.innerHTML = sw + bestTimeHtml(plan, place.short, tips) + riskCalendarHtml(plan, place.short, pk.eo, r.win, tips);
+    wirePlanner(host, tips);
+  }catch(e){
+    if(tok !== PL.tok) return;
+    host.innerHTML = `${sw}<div class="card"><p class="td-exp">The yearly climate for ${esc(place.short)} could not be loaded (${esc((e && e.message) || 'unavailable')}). Try again in a moment.</p></div>`;
+  }
+}
 /* ---------- wiring ---------- */
 function goIdle(){ S.token++; setState('idle'); announce('Explore the globe, search, or click anywhere on Earth.'); }
 function logout(){
@@ -1598,6 +1626,7 @@ document.addEventListener('click', e => {
   const ts = t.closest('[data-trk-sel]'); if(ts){ T.sel = ts.dataset.trkSel; if(ts.dataset.trkTower != null) T.tower = +ts.dataset.trkTower; $$('#trkChips [data-trk-sel]').forEach(x => x.setAttribute('aria-selected', x.dataset.trkSel === T.sel)); drawTrackStage(); renderTrackMatrix(trackList()); return; }
   const tt = t.closest('#trkTowers [data-trk-tower]'); if(tt){ pickTrackTower(+tt.dataset.trkTower); return; }
   const td = t.closest('[data-trk-del]'); if(td){ removeTracked(td.dataset.trkDel); renderTracking(); return; }
+  const ps = t.closest('[data-pl-sel]'); if(ps){ PL.sel = ps.dataset.plSel; if(CMP.res) loadPlanner(CMP.res); return; }
   const cp = t.closest('[data-cmp-pick]'); if(cp){ const l = findLoc(cp.dataset.id) || knownPlaces().find(x => x.id === cp.dataset.id); if(l){ CMP[cp.dataset.cmpPick] = l; CMP.res = null; $(cp.dataset.cmpPick === 'from' ? '#cmpFrom' : '#cmpTo').value = l.name; } return; }
   const pr = t.closest('[data-prole]'); if(pr){ PF.role = pr.dataset.prole; $$('[data-prole]').forEach(x => x.setAttribute('aria-pressed', x === pr)); return; }
   const pi = t.closest('[data-pint]'); if(pi){ const k = pi.dataset.pint; PF.interests.has(k) ? PF.interests.delete(k) : PF.interests.add(k); pi.setAttribute('aria-pressed', PF.interests.has(k)); return; }

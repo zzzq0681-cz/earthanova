@@ -969,3 +969,44 @@ body:is([data-page="plans"],[data-page="profile"],[data-page="tracking"],[data-p
 .hz-card h4{margin:0 0 8px;font:600 13.5px var(--f-head)}
 .risk-viz .hz-fig{background:linear-gradient(180deg,rgba(16,44,66,.6),rgba(9,26,42,.7));border-color:var(--line);padding:14px 14px 12px}
 @media (max-width:900px){.hz-grid.n1,.hz-grid.n2{grid-template-columns:1fr}}
+
+/* ---------- compare page: best time to go + seasonal risk calendar ---------- */
+.pl-root{display:grid;gap:18px;margin-top:18px}
+.pl-switch{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--ink-2);font-size:13px}
+.pl-switch .chip-opt[aria-pressed="true"]{border-color:var(--cyan);background:rgba(34,211,238,.12);color:var(--ink)}
+.pl-sec{display:grid;gap:14px;padding:18px;border-radius:16px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(16,44,66,.55),rgba(9,26,42,.7));min-width:0}
+.pl-h h3{margin:2px 0 0;font:600 19px var(--f-head)}
+.pl-k{margin:0;color:var(--cyan);font:600 11.5px var(--f-body);letter-spacing:.09em;text-transform:uppercase}
+.pl-verdict{margin:0;padding:12px 14px;border-radius:12px;border:1px solid rgba(34,211,238,.4);background:rgba(34,211,238,.07);font:500 14.5px/1.5 var(--f-body)}
+.pl-wins{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.pl-win{display:flex;gap:12px;padding:14px;border-radius:14px;border:1px solid var(--line-2);background:rgba(6,17,31,.5);min-width:0}
+.pl-rank{flex:none;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--cyan);color:#04202B;font:700 14px var(--f-head)}
+.pl-win h4{margin:0;font:600 15px var(--f-head)}
+.pl-win-s{margin:2px 0 8px;color:var(--ink-2);font-size:13px}
+.pl-win-s b{font:700 20px var(--f-head)}
+.pl-win dl{display:grid;grid-template-columns:repeat(3,auto);gap:4px 14px;margin:0 0 8px;justify-content:start}
+.pl-win dt{color:var(--ink-2);font-size:11.5px}
+.pl-win dd{margin:0;font:600 13.5px var(--f-head);font-variant-numeric:tabular-nums}
+.pl-win dd small{color:var(--ink-2);font:400 11.5px var(--f-body)}
+.pl-win-f{margin:0;color:var(--ink-2);font-size:12.5px;line-height:1.45}
+.pl-win-f.ok{color:var(--mint)}
+.pl-fig{background:rgba(6,17,31,.45)}
+.pl-svg .pl-badge{fill:#04202B;font:700 11px var(--f-head)}
+.pl-fig .hz-wrap[data-pl="cal"]{overflow-x:auto}
+.pl-cal{display:grid;gap:5px;min-width:720px}
+.pl-cal-h,.pl-cal-r{display:grid;grid-template-columns:210px repeat(12,minmax(0,1fr));gap:5px;align-items:center}
+.pl-cal-h span{text-align:center;color:var(--ink-2);font-size:12px}
+.pl-cal-h span.is-mine{color:var(--cyan);font-weight:600}
+.pl-cal-l b{display:block;font:600 13px var(--f-head)}
+.pl-cal-l small{display:block;color:var(--ink-2);font-size:11px;line-height:1.3}
+.pl-cell{height:36px;border-radius:9px;display:grid;place-items:center;border:1px solid transparent;font:600 12.5px var(--f-head);font-variant-numeric:tabular-nums;color:var(--ink);cursor:default;outline:none;transition:filter .12s}
+.pl-cell.lv-low{background:rgba(54,226,177,.15);border-color:rgba(54,226,177,.30)}
+.pl-cell.lv-moderate{background:rgba(255,190,85,.24);border-color:rgba(255,190,85,.5)}
+.pl-cell.lv-high{background:rgba(255,97,120,.36);border-color:rgba(255,97,120,.7)}
+.pl-cell.lv-na{background:rgba(145,174,194,.07);border-color:rgba(145,174,194,.18);color:var(--ink-2)}
+.pl-cell.is-mine{box-shadow:0 0 0 2px var(--cyan)}
+.pl-cell:hover,.pl-cell:focus-visible{filter:brightness(1.3)}
+.pl-watch h4{margin:0 0 6px;font:600 14px var(--f-head)}
+.pl-watch li.w-high::marker{color:var(--red)}
+.pl-watch li.w-moderate::marker{color:var(--amber)}
+@media (max-width:900px){.pl-wins{grid-template-columns:1fr}.pl-sec{padding:14px}}

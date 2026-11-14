@@ -83,6 +83,12 @@ export const nasaWindow = (lat, lon, start, end) => {
   return apiGet(`/window?lat=${lat}&lon=${lon}&start=${start}&end=${end}`, 120000);
 };
 
+/* Climate of the whole year (52 weeks and 12 months, last 10 years) for the Compare page planner. */
+export const nasaClimateYear = (lat, lon) => {
+  if (isStatic()) return Promise.reject(new Error('this needs the live server'));
+  return apiGet(`/climate-year?lat=${lat}&lon=${lon}`, 180000);
+};
+
 export const reportUrl = (name, kind) => `${apiBase()}/places/${encodeURIComponent(name)}/report.${kind}`;
 
 /* Same shape as buildAnalysis() in earthanova.js, so every existing panel keeps working.
