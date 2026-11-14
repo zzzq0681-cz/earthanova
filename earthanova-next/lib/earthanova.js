@@ -261,7 +261,7 @@ function interpret(A){
   const hi = {
     solar: solar == null ? ['Unavailable','na',''] : solar >= 5 ? ['High solar resource','good',`${solar.toFixed(1)} kWh/m²/day`] : solar >= 4 ? ['Moderate solar resource','neutral',`${solar.toFixed(1)} kWh/m²/day`] : ['Low solar resource','na',`${solar.toFixed(1)} kWh/m²/day`],
     climate: climateFlags.length ? ['Review recommended','warn',`${climateFlags.length} climate signal${climateFlags.length>1?'s':''}`] : ['No climate flags','good',`vs ${per(A).baseLabel} baseline`],
-    air: !A.aq ? ['Unavailable','na','CAMS'] : A.aq.pm25 <= 15 ? ['Good air quality','good',`PM2.5 ${A.aq.pm25} µg/m³`] : A.aq.pm25 <= 35 ? ['Moderate air quality','warn',`PM2.5 ${A.aq.pm25} µg/m³`] : ['Poor air quality','warn',`PM2.5 ${A.aq.pm25} µg/m³`]
+    air: !A.aq ? ['Not loaded yet','na','no NASA layer yet'] : A.aq.pm25 <= 15 ? ['Good air quality','good',`PM2.5 ${A.aq.pm25} µg/m³`] : A.aq.pm25 <= 35 ? ['Moderate air quality','warn',`PM2.5 ${A.aq.pm25} µg/m³`] : ['Poor air quality','warn',`PM2.5 ${A.aq.pm25} µg/m³`]
   };
   return {dT, dRain, dSoil, drySoil, dHot, flags, climateFlags, hazardFlags, status, hi};
 }
