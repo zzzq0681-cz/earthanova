@@ -528,7 +528,7 @@ export default function EarthanovaMarkup() {
               <header className="page-h">
                 <div>
                   <h1><i data-ic="radar" />Risk Monitoring</h1>
-                  <p id="riskSub">One watch tower per natural hazard, all aimed at your scanned region.</p>
+                  <p id="riskSub">One watch tower per natural hazard, all aimed at your scanned region. Hazard layers use other open sources (USGS, Open-Meteo, CAMS), not the NASA POWER climate record.</p>
                 </div>
                 <div className="ph-actions">
                   <button className="btn-ghost" id="riskRescan"><i data-ic="refresh" />Rescan towers</button>
