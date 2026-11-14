@@ -129,3 +129,23 @@ export function mlHtml(ml, place, opts, tips) {
       <li>Limits: this is a statistical model, not a weather forecast. Beyond about two weeks it is mostly climate plus trend, and the chart above shows that openly. Grid values (about 50 km) can differ from a station.</li></ul></details>
     <p class="hz-note">Source: NASA POWER daily data (MERRA-2 based), model trained on this server. “Typical year” here is the average seasonal cycle over the whole record without a trend. It is guidance, not a safety guarantee; always check official forecasts close to departure.</p></section>`;
 }
+
+/* ---------- next 7 days: Open-Meteo weather forecast (NOT NASA) next to our NASA model ---------- */
+/* om: Open-Meteo daily {time, temperature_2m_max, temperature_2m_min, precipitation_sum, precipitation_probability_max}; near: ml.near (our model, first days after the last NASA observation) */
+export function nextDaysHtml(om, near, place) {
+  const rows = om.time.map((d, i) => {
+    const hi = om.temperature_2m_max[i], lo = om.temperature_2m_min[i], m = (near || []).find(x => x.d === d);
+    return { d, hi, lo, sw: hi - lo, rain: om.precipitation_sum?.[i], pr: om.precipitation_probability_max?.[i], m };
+  }).filter(r => num(r.hi) && num(r.lo));
+  if (!rows.length) return '';
+  const avg = a => a.reduce((x, y) => x + y, 0) / a.length;
+  const both = rows.filter(r => r.m), swOm = avg(rows.map(r => r.sw));
+  const verdict = `Open-Meteo, a weather-forecast model, expects ${f(avg(rows.map(r => r.hi)), 0)} °C by day and ${f(avg(rows.map(r => r.lo)), 0)} °C by night in ${place} over the next ${rows.length} days: a swing of ${f(swOm, 1)} °C on average.`
+    + (both.length ? ` For the ${both.length} of these days our NASA model also covers, it expects ${f(avg(both.map(r => r.m.s)), 1)} °C (Open-Meteo ${f(avg(both.map(r => r.sw)), 1)} °C), so the two ${Math.abs(avg(both.map(r => r.m.s)) - avg(both.map(r => r.sw))) <= 1 ? 'roughly agree' : 'differ'}.` : '');
+  const body = rows.map(r => `<tr><td>${esc(dLong(r.d))}</td><td>${f(r.hi, 0)} / ${f(r.lo, 0)} °C</td><td><b>${f(r.sw, 1)} °C</b></td><td>${r.m ? `${f(r.m.s, 1)} °C <small>(${f(r.m.sl, 1)} to ${f(r.m.sh, 1)})</small>` : '—'}</td><td>${r.m ? f(r.m.typ, 1) + ' °C' : '—'}</td><td>${num(r.rain) ? f(r.rain, 1) + ' mm' : '—'}${num(r.pr) ? ` <small>(${f(r.pr, 0)}%)</small>` : ''}</td></tr>`).join('');
+  return `<section class="pl-sec ml-sec" aria-label="Next days forecast">
+    <header class="pl-h"><div><p class="pl-k">Weather forecast for the next days</p><h3>What does a weather model expect in ${esc(place)} this week?</h3></div><span class="ml-badge" style="border-color:${C.amber};color:${C.amber}">Not NASA: Open-Meteo forecast</span></header>
+    <p class="pl-verdict">${esc(verdict)}</p>
+    <div class="tbl-scroll"><table class="tbl"><thead><tr><th>Date</th><th>High / low (Open-Meteo)</th><th>Swing (Open-Meteo)</th><th>Swing (our NASA model, 80% range)</th><th>Typical year</th><th>Rain (chance)</th></tr></thead><tbody>${body}</tbody></table></div>
+    <p class="hz-note">Open-Meteo combines national weather-service models and is usually the better choice for the coming days. Our NASA model is statistical (climate, trend and recent weather from NASA POWER data), so it is mainly useful for the first days and for dates weeks or months ahead, where no weather model can say more than the climate does. The data in this section comes from Open-Meteo, not from NASA.</p></section>`;
+}

@@ -4,7 +4,7 @@
 import Globe from 'globe.gl';
 import {towerViz, renderChart as renderHzChart, wireCharts as wireHzCharts} from './hazard-charts.js';
 import {buildPlan, bestTimeHtml, riskCalendarHtml, eonetByMonth, wirePlanner} from './compare-planner.js';
-import {mlHtml, mlErrorHtml} from './compare-ml.js';
+import {mlHtml, mlErrorHtml, nextDaysHtml} from './compare-ml.js';
 import {eonetEvents, nasaHazards, nasaWindow, nasaClimateYear, nasaPredict, apiBase, nasaFind, nasaEnsure, nasaLoad, nasaBuildAnalysis, isStatic, reportUrl} from './nasa-data.js';
 
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
@@ -1623,7 +1623,7 @@ async function loadPlanner(r){
   const host = $('#cmpPlan'); if(!host) return;
   const tok = ++PL.tok, place = PL.sel === 'from' ? r.a.loc : r.b.loc, data = PL.sel === 'from' ? r.a : r.b;
   const sw = `<div class="pl-switch" role="group" aria-label="Place to analyse"><span>Analyse:</span><button type="button" class="chip-opt" data-pl-sel="from" aria-pressed="${PL.sel === 'from'}">${esc(r.a.loc.short)} <small>(from)</small></button><button type="button" class="chip-opt" data-pl-sel="to" aria-pressed="${PL.sel === 'to'}">${esc(r.b.loc.short)} <small>(to)</small></button></div>`;
-  host.innerHTML = `${sw}<div id="mlHost"><div class="card cmp-load"><div class="spinner"></div><p>Training the forecast model for ${esc(place.short)} on NASA daily data. The first time for a place can take a minute…</p></div></div><div id="plHost"><div class="card cmp-load"><div class="spinner"></div><p>Loading the year of NASA climate for ${esc(place.short)}. A new place can take a minute…</p></div></div>`;
+  host.innerHTML = `${sw}<div id="omHost"></div><div id="mlHost"><div class="card cmp-load"><div class="spinner"></div><p>Training the forecast model for ${esc(place.short)} on NASA daily data. The first time for a place can take a minute…</p></div></div><div id="plHost"><div class="card cmp-load"><div class="spinner"></div><p>Loading the year of NASA climate for ${esc(place.short)}. A new place can take a minute…</p></div></div>`;
   const pk = PL.cache[place.id] ??= {};
   const days = Math.max(1, Math.round((new Date(r.win.end) - new Date(r.win.start)) / 864e5) + 1);
   const range = PREF[r.pref].slice(0, 2);
@@ -1642,6 +1642,15 @@ async function loadPlanner(r){
       const msg = (e && e.message) || 'unavailable', soft = /past|ahead|window/.test(msg);
       mh.innerHTML = mlErrorHtml(place.short, soft ? msg + '.' : `The forecast model could not be trained for ${place.short} (${msg}). Try again in a moment.`, soft);
     }
+  })();
+  /* section 0: Open-Meteo weather forecast for the next 7 days (not NASA), next to our model's first days; hidden if it cannot load */
+  (async () => {
+    try{
+      pk.om ??= getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${place.lat}&longitude=${place.lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max&forecast_days=7&timezone=auto`, 15000);
+      const [omR, mlR] = await Promise.allSettled([pk.om, (pk.ml ??= nasaPredict(place.lat, place.lon, r.win.start, r.win.end))]);
+      if(tok !== PL.tok || omR.status !== 'fulfilled' || !omR.value || !omR.value.daily) { if(omR.status !== 'fulfilled') delete pk.om; return; }
+      const el = $('#omHost'); if(el) el.innerHTML = nextDaysHtml(omR.value.daily, mlR.status === 'fulfilled' ? mlR.value.near : null, place.short);
+    }catch{ delete pk.om; }
   })();
   /* sections 2 and 3: best time to go and seasonal risk calendar */
   try{
