@@ -176,6 +176,8 @@ async function analyzeNasa(loc, radiusKm, onStep, period){
   A.quakes = qk.status === 'fulfilled' ? qk.value : null;
   A.dust = hz.status === 'fulfilled' ? hz.value.dust : null;
   A.sea = hz.status === 'fulfilled' ? hz.value.sea : null;
+  A.air = hz.status === 'fulfilled' ? hz.value.air || null : null;
+  if(A.air?.annual?.length){ const r5 = A.air.annual.slice(-5); A.aq = {pm25:Math.round(mean(r5) * 10) / 10, years:r5.length, aod:A.air.aod_recent, comp:A.air.components_recent}; }
   A.hazErr = hz.status === 'rejected' ? (hz.reason?.message || 'unavailable') : (hz.value?.error || null);
   return A;
 }
@@ -287,7 +289,7 @@ function interpret(A){
   const hi = {
     solar: solar == null ? ['Unavailable','na',''] : solar >= 5 ? ['High solar resource','good',`${solar.toFixed(1)} kWh/m²/day`] : solar >= 4 ? ['Moderate solar resource','neutral',`${solar.toFixed(1)} kWh/m²/day`] : ['Low solar resource','na',`${solar.toFixed(1)} kWh/m²/day`],
     climate: climateFlags.length ? ['Review recommended','warn',`${climateFlags.length} climate signal${climateFlags.length>1?'s':''}`] : ['No climate flags','good',`vs ${per(A).baseLabel} baseline`],
-    air: !A.aq ? ['Not loaded yet','na','no NASA layer yet'] : A.aq.pm25 <= 15 ? ['Good air quality','good',`PM2.5 ${A.aq.pm25} µg/m³`] : A.aq.pm25 <= 35 ? ['Moderate air quality','warn',`PM2.5 ${A.aq.pm25} µg/m³`] : ['Poor air quality','warn',`PM2.5 ${A.aq.pm25} µg/m³`]
+    air: !A.aq ? ['Not loaded yet','na','NASA air data not loaded'] : A.aq.pm25 <= 15 ? ['Good air quality','good',`PM2.5 ${A.aq.pm25} µg/m³`] : A.aq.pm25 <= 35 ? ['Moderate air quality','warn',`PM2.5 ${A.aq.pm25} µg/m³`] : ['Poor air quality','warn',`PM2.5 ${A.aq.pm25} µg/m³`]
   };
   return {dT, dRain, dryRain, shortRain, dSoil, drySoil, dHot, flags, climateFlags, hazardFlags, status, hi};
 }
@@ -485,15 +487,27 @@ const HAZARDS = [
   {id:'heat', code:'T-02', name:'Heat Tower', hazard:'Extreme heat', icon:'sun', src:'NASA POWER (MERRA-2) temperature'},
   {id:'drought', code:'T-03', name:'Drought Tower', hazard:'Drought', icon:'soil', src:'NASA POWER soil wetness and NASA GPM IMERG rainfall'},
   {id:'flood', code:'T-04', name:'Storm & Flood Tower', hazard:'Floods, storms and landslides', icon:'drop', src:'NASA GPM IMERG rainfall change and NASA EONET flood, storm and landslide events (GDACS, NOAA NHC, JTWC)'},
-  {id:'dust', code:'T-05', name:'Dust Tower', hazard:'Windblown dust', icon:'wind', src:'NASA MERRA-2 aerosol diagnostics (surface dust PM2.5)'},
+  {id:'dust', code:'T-05', name:'Air Quality Tower', hazard:'Air quality (fine particles)', icon:'wind', src:'NASA MERRA-2 aerosol diagnostics (PM2.5 from dust, sea salt, black carbon, organic carbon and sulfate)'},
   {id:'sea', code:'T-06', name:'Sea-Level Tower', hazard:'Sea-level rise', icon:'waves', src:'NASA-SSH satellite altimetry (reference missions), 0.5 degree grid'}
 ];
 const LEVEL = {low:['Low','#36E2B1'], moderate:['Moderate','#FFBE55'], high:['High','#FF6178'], na:['No data','#91AEC2'], scanning:['Scanning','#22D3EE']};
 const clamp = (v, a=0, b=100) => Math.max(a, Math.min(b, v));
-function dustSeaTowers(dust, sea, hzNote){
+function airTower(Ar){
+  const last5 = Ar.annual.slice(-5), rec = mean(last5), all = mean(Ar.annual), tr = Ar.trend_per_decade, c = Ar.components_recent;
+  const parts = [['Dust', c.dust], ['Sulfate', c.so4], ['Organic carbon', c.oc], ['Sea salt', c.salt], ['Black carbon', c.bc]].sort((a, b) => b[1] - a[1]);
+  const top = parts[0];
+  return {
+    level:rec >= 35 ? 'high' : rec >= 15 ? 'moderate' : 'low', score:Math.round(clamp(rec / 35 * 100)),
+    headline:`Fine particles (PM2.5) average ${rec.toFixed(1)} µg/m³ (last ${last5.length} years)`,
+    explain:`Total fine particles in the air near the ground, from NASA MERRA-2: dust, sea salt, black carbon, organic carbon and sulfate added together (the formula NASA's modelling office publishes). The biggest part here is ${top[0].toLowerCase()} (${top[1].toFixed(1)} µg/m³). Moderate at 15 µg/m³ and high at 35 µg/m³ as a yearly mean, the WHO 2021 interim targets 3 and 1 (the WHO guideline itself is 5). It is modelled and assimilated data on a 50 km grid: it shows the regional air, not a street-level or city-centre reading, and it has no gases such as NO₂ or ozone.`,
+    metrics:[[`Last ${last5.length} years`, rec.toFixed(1) + ' µg/m³'], [`Long-term mean (${Ar.years[0]}–${Ar.years[Ar.years.length - 1]})`, all.toFixed(1) + ' µg/m³'], ['Trend', tr == null ? 'n/a' : `${sgn(tr, 2)} µg/m³ per decade${Ar.significant ? '' : ' (not significant)'}`],
+      ['Made of', parts.map(x => `${x[0]} ${x[1].toFixed(1)}`).join(' · ')], ['Aerosol optical depth', Ar.aod_recent == null ? 'n/a' : Ar.aod_recent.toFixed(2)]], items:[]};
+}
+function dustSeaTowers(dust, sea, hzNote, air){
   const H = {};
   const D = dust;
-  if(!D || !D.annual?.length) H.dust = {level:'na', score:0, headline:'NASA dust data unavailable', explain:`The NASA MERRA-2 aerosol series could not be loaded for this point${hzNote}.`, metrics:[], items:[]};
+  if(air?.annual?.length >= 8) H.dust = airTower(air);
+  else if(!D || !D.annual?.length) H.dust = {level:'na', score:0, headline:'NASA dust data unavailable', explain:`The NASA MERRA-2 aerosol series could not be loaded for this point${hzNote}.`, metrics:[], items:[]};
   else {
     const last5 = D.annual.slice(-5), rec = mean(last5), all = mean(D.annual), tr = D.trend_per_decade;
     H.dust = {
@@ -551,7 +565,7 @@ function hazardReadings(A, I){
   const items = (list, tag) => list.slice(0, 6).map(e => ({title:e.title, meta:`${e.date} · ${e.dist} km away${e.mag ? ' · ' + e.mag : ''}`, url:e.url, tag}));
   const trunc = eo && eo.truncated ? ' (list truncated at 1000 events, true count is higher)' : '';
   const hzNote = A.hazErr ? ` (${A.hazErr})` : '';
-  Object.assign(H, dustSeaTowers(A.dust, A.sea, hzNote));
+  Object.assign(H, dustSeaTowers(A.dust, A.sea, hzNote, A.air));
   /* fold NASA EONET events into the towers they belong to */
   const RANK = {na:0, low:1, moderate:2, high:3};
   const fold = (r, lv, score, head, its, metric, note) => {
@@ -635,7 +649,7 @@ function renderRisk(){
   const has = !!S.A;
   $('#riskWrap').hidden = !has; $('#riskEmpty').hidden = has;
   if(!has) return;
-  $('#riskSub').textContent = `${S.loc.name} · scanned ${ago(S.A.fetchedAt)} · ${S.A.radiusKm} km radius. Storms, floods, landslides and volcanoes come from NASA EONET; dust from NASA MERRA-2; sea level from NASA-SSH altimetry; earthquakes from USGS (EONET has none); heat, drought and rainfall signals from NASA POWER and GPM IMERG. Wildfires are not tracked: EONET does not separate natural from human-caused fires.`;
+  $('#riskSub').textContent = `${S.loc.name} · scanned ${ago(S.A.fetchedAt)} · ${S.A.radiusKm} km radius. Storms, floods, landslides and volcanoes come from NASA EONET; air quality (PM2.5) from NASA MERRA-2; sea level from NASA-SSH altimetry; earthquakes from USGS (EONET has none); heat, drought and rainfall signals from NASA POWER and GPM IMERG. Wildfires are not tracked: EONET does not separate natural from human-caused fires.`;
   refreshMosaics();
   const tok = ++S.riskTok, final = levelsOf(S.H), cur = HAZARDS.map(() => 'scanning');
   renderRiskStage(cur); renderTowerList(cur); renderTowerDetail();
@@ -775,7 +789,7 @@ function plainSummary(A, I){
   const pts = [];
   if(dT != null) pts.push({icon:'thermo', text:Math.abs(dT) < 0.3 ? `Average temperature is about the same as in ${per(A).baseLabel}.` : `The average temperature is ${Math.abs(dT).toFixed(1)} °C ${dT > 0 ? 'higher' : 'lower'} than in ${per(A).baseLabel}.`});
   if(I.dRain != null) pts.push({icon:'drop', text:I.dRain <= -10 ? `Recent years were drier: ${Math.abs(I.dRain)}% less rain than ${per(A).baseLabel}. Short windows, a few wet years can dominate.` : I.dRain >= 10 ? `Recent years were wetter: ${I.dRain}% more rain than ${per(A).baseLabel}. Short windows, a few wet years can dominate.` : 'The amount of yearly rain is about the same as before.'});
-  pts.push({icon:'wind', text:!A.aq ? 'Air quality data is not available here right now.' : A.aq.pm25 <= 15 ? 'The air is clean (fine dust is low).' : A.aq.pm25 <= 35 ? 'The air is a little dusty. Sensitive people may notice.' : 'The air is quite dusty. Limit long outdoor exercise on bad days.'});
+  pts.push({icon:'wind', text:!A.aq ? 'Air quality data is not available here right now.' : A.aq.pm25 <= 15 ? 'The air is clean (fine particles are low).' : A.aq.pm25 <= 35 ? 'The air has a moderate level of fine particles. Sensitive people may notice.' : 'The air has a lot of fine particles. Limit long outdoor exercise on bad days.'});
   const sol = A.cur.solar ?? A.base.solar;
   if(sol != null) pts.push({icon:'sun', text:sol >= 5 ? 'It is very sunny here, which is great for solar power.' : sol >= 4 ? 'There is a fair amount of sun for solar power.' : 'Sunshine is on the lower side for solar power.'});
   if(A.proj) pts.push({icon:'trend', text:`By ${per(A).projYears[4]} the average temperature is expected to be around ${A.proj.mean[4].toFixed(1)} °C.`});
@@ -798,7 +812,7 @@ function renderAdvanced(){
     <div><span>Significance (95%)</span><b>${tr ? (tr.sig ? 'Significant' : 'Not significant') : 'n/a'}</b></div>
     <div><span>${A.nasa ? 'NASA grid point' : 'ERA5 grid cell'}</span><b class="mono">${A.grid.lat.toFixed(2)}, ${A.grid.lon.toFixed(2)}</b></div>
     <div><span>Elevation (DEM)</span><b>${A.elev != null ? Math.round(A.elev) + ' m' : 'n/a'}</b></div>
-    <div><span>PM2.5 mean (90 d)</span><b>${A.aq ? A.aq.pm25 + ' µg/m³' : 'n/a'}</b></div></div>
+    <div><span>PM2.5 mean (last 5 years)</span><b>${A.aq ? A.aq.pm25 + ' µg/m³' : 'n/a'}</b></div></div>
     <p>${tr ? `Ordinary least squares on ${tr.n} annual means: ${tr.sig ? 'the slope is significant at the 95% level.' : 'the slope is not significant at the 95% level, so treat it as directional.'}` : ''} Baseline (${per(A).baseLabel}) and current (${per(A).curLabel}) windows differ in length (${per(A).baseYears.length} vs ${per(A).curYears.length} years). Hot-day threshold ${A.hotBase} °C. Fetched ${new Date(A.fetchedAt).toISOString().replace('T',' ').slice(0,16)} UTC.</p>`;
   const r = A.years.map(y => `<tr><td>${y.year}</td><td>${y.temp?.toFixed(2) ?? '—'}</td><td>${y.rain ?? '—'}</td><td>${y.hot ?? '—'}</td><td>${y.soil ?? '—'}</td><td>${y.solar?.toFixed(2) ?? '—'}</td></tr>`).join('');
   const row = (lbl, o) => `<tr class="avg"><td>${lbl}</td><td>${o.temp?.toFixed(2) ?? '—'}</td><td>${o.rain ?? '—'}</td><td>${o.hot ?? '—'}</td><td>${o.soil ?? '—'}</td><td>${o.solar?.toFixed(2) ?? '—'}</td></tr>`;
@@ -812,7 +826,7 @@ function renderAdvanced(){
   $('#advHaz').innerHTML = `<table class="tbl"><thead><tr><th>Tower</th><th>Level</th><th>Score</th><th class="l">Finding</th></tr></thead><tbody>${towers}</tbody></table>
     <h3>Earthquakes M4+ within ${A.radiusKm} km, ${per(A).label}</h3>${A.quakes ? (quakes ? `<table class="tbl"><thead><tr><th>Date</th><th>Mag</th><th class="l">Place</th><th>Distance</th></tr></thead><tbody>${quakes}</tbody></table>` : '<div class="empty">None recorded.</div>') : '<div class="empty">USGS data unavailable.</div>'}`;
   $('#advExport').innerHTML = `<div class="btn-row"><button class="btn-primary" data-act="report-quick">${ic('file')}Save as report</button><button class="btn-secondary" data-act="csv">${ic('download')}Download CSV</button></div>
-    <p>Sources: ${A.nasa ? 'NASA POWER (MERRA-2 / CERES) monthly data; NASA GPM IMERG V07 rainfall; NASA EONET events (storms, floods, landslides, volcanoes; notable events only); NASA MERRA-2 dust aerosol; NASA-SSH sea level; USGS Earthquake Catalog; Esri World Imagery Wayback. Grid values (~50 km) can differ from station records.' : 'ERA5 reanalysis (ECMWF / Copernicus) and CMIP6 via Open-Meteo; USGS Earthquake Catalog; Copernicus DEM; CAMS air quality; Esri World Imagery Wayback. Grid values (~25 km) can differ from station records.'} Screening rules are simple thresholds, not an official assessment.</p>`;
+    <p>Sources: ${A.nasa ? 'NASA POWER (MERRA-2 / CERES) monthly data; NASA GPM IMERG V07 rainfall; NASA EONET events (storms, floods, landslides, volcanoes; notable events only); NASA MERRA-2 aerosols (air quality, PM2.5); NASA-SSH sea level; USGS Earthquake Catalog; Esri World Imagery Wayback. Grid values (~50 km) can differ from station records.' : 'ERA5 reanalysis (ECMWF / Copernicus) and CMIP6 via Open-Meteo; USGS Earthquake Catalog; Copernicus DEM; CAMS air quality; Esri World Imagery Wayback. Grid values (~25 km) can differ from station records.'} Screening rules are simple thresholds, not an official assessment.</p>`;
 }
 
 /* Playful: quizzes and games */
@@ -833,7 +847,7 @@ function funTiles(A, I){
   const dT = I.dT;
   if(dT != null) tiles.push({icon:'thermo', big:dT >= 0.3 ? 'Warmer' : dT <= -0.3 ? 'Cooler' : 'Steady', line:dT >= 0.6 ? 'Ice cream here has officially become a drink.' : dT >= 0.3 ? 'Ice cream melts a bit faster than it used to.' : dT <= -0.3 ? 'Penguins nod approvingly.' : 'The planet\'s thermostat is staying chill.', tone:dT >= 0.3 ? 'warn' : 'good'});
   if(I.dRain != null) tiles.push({icon:'drop', big:I.dRain >= 10 ? 'Wetter' : I.dRain <= -10 ? 'Drier' : 'Same rain', line:I.dRain >= 10 ? 'Umbrellas are working overtime.' : I.dRain <= -10 ? 'The plants are sending polite complaints.' : 'Umbrellas keep their normal hours.', tone:I.dRain <= -10 || I.dRain >= 20 ? 'warn' : 'good'});
-  tiles.push({icon:'wind', big:!A.aq ? 'Unknown' : A.aq.pm25 <= 15 ? 'Clean air' : A.aq.pm25 <= 35 ? 'A bit hazy' : 'Dusty', line:!A.aq ? 'Our air sensors took a nap.' : A.aq.pm25 <= 15 ? 'Lungs say thank you.' : A.aq.pm25 <= 35 ? 'Maybe skip the marathon today.' : 'Masks are in fashion.', tone:!A.aq || A.aq.pm25 <= 15 ? 'good' : 'warn'});
+  tiles.push({icon:'wind', big:!A.aq ? 'Unknown' : A.aq.pm25 <= 15 ? 'Clean air' : A.aq.pm25 <= 35 ? 'A bit hazy' : 'Smoggy', line:!A.aq ? 'Our air sensors took a nap.' : A.aq.pm25 <= 15 ? 'Lungs say thank you.' : A.aq.pm25 <= 35 ? 'Maybe skip the marathon today.' : 'Masks are in fashion.', tone:!A.aq || A.aq.pm25 <= 15 ? 'good' : 'warn'});
   const sol = A.cur.solar ?? A.base.solar;
   tiles.push({icon:'sun', big:sol == null ? 'Unknown' : sol >= 5 ? 'Super sunny' : sol >= 4 ? 'Pretty sunny' : 'Gentle sun', line:sol == null ? 'The sun is being shy.' : sol >= 5 ? 'Solar panels work double shifts.' : sol >= 4 ? 'Solar panels are happy.' : 'Solar panels take lots of tea breaks.', tone:'good'});
   tiles.push({icon:'quake', big:!A.quakes ? 'Unknown' : A.quakes.count === 0 ? 'Calm ground' : `${A.quakes.count} wiggles`, line:!A.quakes ? 'The ground is keeping secrets.' : A.quakes.count === 0 ? 'No big shakes in this period.' : `Earthquakes of M4+ near ${n} in ${per(A).label}. Earth likes to stretch.`, tone:A.quakes && A.quakes.count >= 10 ? 'warn' : 'good'});
@@ -847,7 +861,7 @@ function buildQuiz(A, I){
   const hot = A.years.filter(y => y.temp != null).sort((x, y) => y.temp - x.temp)[0];
   if(hot){ const yrs = [...new Set([hot.year, ...per(A).years].filter(y => y !== hot.year).slice(0, 3).concat(hot.year))].sort(); qs.push({t:`Which year was the hottest in ${n} between ${per(A).start} and ${per(A).end}?`, o:yrs.map(y => [String(y), String(y)]), a:String(hot.year), ok:`Right! ${hot.year} averaged ${hot.temp.toFixed(1)} °C.`, no:`It was ${hot.year}, at ${hot.temp.toFixed(1)} °C. Sunscreen would have helped.`}); }
   if(A.quakes){ const c = A.quakes.count, a = c === 0 ? 'none' : c < 10 ? 'few' : 'many'; qs.push({t:`How many earthquakes of M4+ happened within ${A.radiusKm} km in ${per(A).label}?`, o:[['none','None'],['few','1 to 9'],['many','10 or more']], a, ok:`Spot on: ${c}. Your instincts are seismic.`, no:`It was ${c}. The ground has been busier (or calmer) than you guessed.`}); }
-  if(A.aq){ const p = A.aq.pm25, a = p <= 15 ? 'clean' : p <= 35 ? 'mid' : 'dusty'; qs.push({t:`How is the air in ${n}? (fine dust, PM2.5)`, o:[['clean','Clean'],['mid','A bit dusty'],['dusty','Very dusty']], a, ok:`Yes! ${p} µg/m³. Lungs approve this message.`, no:`It is ${p} µg/m³, so the answer differs from your guess. Air is sneaky.`}); }
+  if(A.aq){ const p = A.aq.pm25, a = p <= 15 ? 'clean' : p <= 35 ? 'mid' : 'dusty'; qs.push({t:`How is the air in ${n}? (fine particles, PM2.5)`, o:[['clean','Clean'],['mid','A bit hazy'],['dusty','Very polluted']], a, ok:`Yes! ${p} µg/m³. Lungs approve this message.`, no:`It is ${p} µg/m³, so the answer differs from your guess. Air is sneaky.`}); }
   return qs.slice(0, 5);
 }
 function resetQuiz(){ Object.assign(Q, {qs:buildQuiz(S.A, S.I), i:0, score:0, locked:false, key:`${S.loc.id}:quiz`}); renderQuiz(); }
@@ -1218,7 +1232,7 @@ function reportHTML(rep, autoPrint){
   ${has('years') ? `<h2>Yearly record (${A.nasa ? 'NASA POWER' : 'ERA5'})</h2><table><thead><tr><th>Year</th><th>Mean °C</th><th>Rain mm</th><th>Days ≥ ${A.hotBase} °C</th><th>Soil m³/m³</th><th>Solar kWh/m²/d</th></tr></thead><tbody>${tr}</tbody></table>` : ''}
   ${has('projection') && A.proj ? `<h2>Projection ${rng(per(A).projYears)} (CMIP6, bias-adjusted)</h2><table><thead><tr><th>Year</th><th>Model low</th><th>Ensemble mean</th><th>Model high</th></tr></thead><tbody>${pr}</tbody></table>` : ''}
   ${has('hazards') ? `<h2>Earthquakes M4+ within ${A.radiusKm} km, ${per(A).label}</h2>${A.quakes ? (A.quakes.list.length ? `<table><thead><tr><th>Date</th><th>Magnitude</th><th>Place</th><th>Distance</th></tr></thead><tbody>${A.quakes.list.slice(0,15).map(e => `<tr><td>${new Date(e.time).toISOString().slice(0,10)}</td><td>${e.mag.toFixed(1)}</td><td style="text-align:left">${esc(e.place)}</td><td>${e.dist} km</td></tr>`).join('')}</tbody></table>` : '<p>None recorded.</p>') : '<p>Unavailable.</p>'}` : ''}
-  <h2>Sources &amp; limitations</h2><p class="muted">${A.nasa ? 'NASA POWER (MERRA-2 / CERES) monthly data; NASA GPM IMERG V07 rainfall; NASA EONET events; NASA MERRA-2 dust; NASA-SSH sea level; USGS Earthquake Catalog; Esri World Imagery Wayback. Grid-cell values (~50 km) may differ' : 'ERA5 reanalysis (Copernicus/ECMWF) and CMIP6 HighResMIP via Open-Meteo; USGS Earthquake Catalog; CAMS air quality; Copernicus DEM; Esri World Imagery Wayback. Grid-cell values (~25 km) may differ'} from station records. Screening rules are simple thresholds and not an official assessment. Projections are scenario-based, not forecasts.</p>
+  <h2>Sources &amp; limitations</h2><p class="muted">${A.nasa ? 'NASA POWER (MERRA-2 / CERES) monthly data; NASA GPM IMERG V07 rainfall; NASA EONET events; NASA MERRA-2 aerosols (air quality, PM2.5); NASA-SSH sea level; USGS Earthquake Catalog; Esri World Imagery Wayback. Grid-cell values (~50 km) may differ' : 'ERA5 reanalysis (Copernicus/ECMWF) and CMIP6 HighResMIP via Open-Meteo; USGS Earthquake Catalog; CAMS air quality; Copernicus DEM; Esri World Imagery Wayback. Grid-cell values (~25 km) may differ'} from station records. Screening rules are simple thresholds and not an official assessment. Projections are scenario-based, not forecasts.</p>
   ${autoPrint ? '<script>addEventListener("load",()=>setTimeout(()=>print(),400))<\/script>' : ''}</body></html>`;
 }
 function openReport(rep, autoPrint, pre){
@@ -1522,9 +1536,11 @@ async function placeData(l, win){
   const quakes = f ? {perYear:f.length / 10, count:f.length, max:f.length ? Math.max(...f.map(q => q.properties.mag)) : null} : null;
   const dustA = dst.status === 'fulfilled' ? dst.value.dust?.annual : null;
   const dust = dustA && dustA.length ? mean(dustA.slice(-5)) : null;
+  const airA = dst.status === 'fulfilled' ? dst.value.air?.annual : null;
+  const pm = airA && airA.length >= 5 ? mean(airA.slice(-5)) : null;
   const fd = fc.status === 'fulfilled' ? fc.value.daily : null;
   const fcast = fd && fd.time.length ? {n:fd.time.length, hi:mean(fd.temperature_2m_max), lo:mean(fd.temperature_2m_min), rain:fd.precipitation_sum.reduce((a, b) => a + (b || 0), 0), gust:Math.max(...fd.wind_gusts_10m_max)} : null;
-  return {loc:l, clim, quakes, dust, elev:null, fcast};
+  return {loc:l, clim, quakes, dust, pm, elev:null, fcast};
 }
 function scorePlace(d, pref, purpose){
   const c = d.clim, [lo, hi] = PREF[pref], dist = c.meanT < lo ? lo - c.meanT : c.meanT > hi ? c.meanT - hi : 0;
@@ -1532,7 +1548,7 @@ function scorePlace(d, pref, purpose){
   P.comfort = {score:clamp(100 - dist * 8 - Math.max(0, c.hi - 36) * 3), w:{trip:.30, relocate:.25}};
   P.rain = {score:clamp(100 - c.rainPerDay * 12 - c.wetFrac * 20), w:{trip:.20, relocate:.10}};
   P.extreme = {score:clamp(100 - c.hotFrac * 220 - c.coldFrac * 160), w:{trip:.15, relocate:.15}};
-  P.air = {score:d.dust == null ? 60 : clamp(100 - d.dust * 2.5), w:{trip:.10, relocate:.25}};
+  P.air = {score:d.pm != null ? clamp(100 - d.pm * 1.6) : d.dust == null ? 60 : clamp(100 - d.dust * 2.5), w:{trip:.10, relocate:.25}};
   P.seismic = {score:d.quakes ? clamp(100 - d.quakes.perYear * 5 - ((d.quakes.max || 0) >= 7 ? 20 : 0)) : 70, w:{trip:.15, relocate:.20}};
   if(d.elev != null && d.elev > 2000) P.altitude = {score:clamp(100 - (d.elev - 2000) / 25), w:{trip:.10, relocate:.05}};
   let tw = 0, ts = 0; Object.values(P).forEach(p => { const w = p.w[purpose]; tw += w; ts += w * p.score; });
@@ -1542,14 +1558,15 @@ const CMP_METRICS = [
   ['comfort', 'Typical temperature', d => `${d.clim.meanT.toFixed(1)} °C <small>(high ${d.clim.hi.toFixed(0)} · low ${d.clim.lo.toFixed(0)})</small>`],
   ['rain', 'Rain in your dates', d => `${d.clim.rainTotal.toFixed(0)} mm <small>(${Math.round(d.clim.wetFrac * 100)}% wet days)</small>`],
   ['extreme', 'Extreme heat / cold days', d => `${Math.round(d.clim.hotFrac * 100)}% hot · ${Math.round(d.clim.coldFrac * 100)}% freezing`],
-  ['air', 'Natural dust (PM2.5, yearly mean)', d => d.dust == null ? 'No data' : `${d.dust.toFixed(1)} µg/m³`],
+  ['air', 'Air quality (PM2.5, yearly mean)', d => d.pm != null ? `${d.pm.toFixed(1)} µg/m³` : d.dust == null ? 'No data' : `${d.dust.toFixed(1)} µg/m³ <small>(dust only)</small>`],
   ['seismic', 'Earthquake activity', d => d.quakes ? `${d.quakes.perYear.toFixed(1)} M4.5+ / yr${d.quakes.max ? ` <small>(max M${d.quakes.max.toFixed(1)})</small>` : ''}` : 'No data'],
   ['altitude', 'Altitude', d => d.elev == null ? '—' : `${Math.round(d.elev)} m`]
 ];
 function advise(a, b, sa, sb, win, purpose){
   const diff = sb.total - sa.total, flags = [], pros = [], cons = [], tips = [], c = b.clim;
   if(b.quakes && ((b.quakes.max || 0) >= 6.5 || b.quakes.perYear >= 15)) flags.push(`${b.loc.short} has high earthquake activity.`);
-  if(b.dust != null && b.dust > 40) flags.push(`${b.loc.short} is very dusty: windblown dust averages ${b.dust.toFixed(0)} µg/m³ (PM2.5).`);
+  if(b.pm != null && b.pm > 35) flags.push(`${b.loc.short} has poor air quality: fine particles (PM2.5) average ${b.pm.toFixed(0)} µg/m³, above the WHO 35 µg/m³ interim target.`);
+  else if(b.pm == null && b.dust != null && b.dust > 40) flags.push(`${b.loc.short} is very dusty: windblown dust averages ${b.dust.toFixed(0)} µg/m³ (PM2.5).`);
   if(c.hotFrac > .35) flags.push(`More than a third of your days in ${b.loc.short} reach 35 °C or more.`);
   if(c.coldFrac > .4) flags.push(`Many nights in ${b.loc.short} fall below freezing.`);
   if(b.elev != null && b.elev > 2500) flags.push(`${b.loc.short} is high (${Math.round(b.elev)} m): altitude sickness is possible.`);
@@ -1592,7 +1609,7 @@ function showCompare(r){
   const dd = x => new Date(x + 'T12:00:00').toLocaleDateString();
   $('#cmpOut').innerHTML = `<div class="cmp-verdict v-${v.level}"><span class="v-ic">${ic(v.level === 'good' ? 'check' : 'alert')}</span><div><p class="v-k">${r.purpose === 'trip' ? 'Trip advice' : 'Relocation advice'} · ${dd(win.start)} to ${dd(win.end)}</p><h2>${esc(v.head)}</h2><p>${esc(a.loc.short)} scores ${sa.total} and ${esc(b.loc.short)} scores ${sb.total} (${v.diff >= 0 ? '+' : '−'}${Math.abs(v.diff)} for your destination).</p></div></div>
     <div class="cmp-cards">${sc(a, sa)}${sc(b, sb)}</div>
-    <div class="card"><div class="tbl-scroll"><table class="tbl cmp-tbl"><thead><tr><th></th><th>${esc(a.loc.short)} <small>(from)</small></th><th>${esc(b.loc.short)} <small>(to)</small></th></tr></thead><tbody>${rows}</tbody></table></div><p class="muted">Climate values are averages for the same dates over ${LAST_YEAR - 4}–${LAST_YEAR} (NASA POWER daily; rain from NASA GPM IMERG when the place is stored, otherwise POWER), so they describe what is typical, not a forecast${a.fcast || b.fcast ? ' (the short forecast shown is from Open-Meteo, not NASA)' : ''}. Dust is the natural part of airborne particles from NASA MERRA-2; earthquakes are from USGS. A check mark means clearly better.</p></div>
+    <div class="card"><div class="tbl-scroll"><table class="tbl cmp-tbl"><thead><tr><th></th><th>${esc(a.loc.short)} <small>(from)</small></th><th>${esc(b.loc.short)} <small>(to)</small></th></tr></thead><tbody>${rows}</tbody></table></div><p class="muted">Climate values are averages for the same dates over ${LAST_YEAR - 4}–${LAST_YEAR} (NASA POWER daily; rain from NASA GPM IMERG when the place is stored, otherwise POWER), so they describe what is typical, not a forecast${a.fcast || b.fcast ? ' (the short forecast shown is from Open-Meteo, not NASA)' : ''}. Air quality (PM2.5, all fine particles) is from NASA MERRA-2; earthquakes are from USGS. A check mark means clearly better.</p></div>
     <div class="cmp-notes">${v.flags.length ? `<section class="card"><h3>${ic('alert')}Watch out</h3><ul class="notes">${li(v.flags, 'alert', 'bad')}</ul></section>` : ''}${(v.pros.length || v.cons.length) ? `<section class="card"><h3>${ic('compare')}Why</h3><ul class="notes">${li(v.pros, 'check', 'good')}${li(v.cons, 'alert', 'bad')}</ul></section>` : ''}${v.tips.length ? `<section class="card"><h3>${ic('bulb')}Tips for ${esc(b.loc.short)}</h3><ul class="notes">${li(v.tips, 'bulb', '')}</ul></section>` : ''}</div>
     <div class="btn-row"><button class="btn-primary" data-act="cmp-open">${ic('scan')}Open ${esc(b.loc.short)} dashboard</button></div>
     <div class="pl-root" id="cmpPlan"></div>

@@ -236,7 +236,22 @@ export function towerViz(id, A, ctx) {
     }
   }
 
-  if (id === 'dust') {
+  if (id === 'dust' && A.air?.annual?.length >= 8) {
+    const R = A.air, sl = R.trend_per_decade != null ? R.trend_per_decade / 10 : null, line = sl != null ? withTrendAt(senLine(R.years, R.annual, sl), R.years) : null;
+    if (line) line.label = `Trend ${sg(sl * 10, 2)} µg/m³ per decade`;
+    const last5 = mean(R.annual.slice(-5)), all = mean(R.annual), hi = argmax(R.annual), nMod = R.annual.filter(v => v >= 15).length, c = R.components_recent;
+    out.charts.push({ title: 'Fine particles in the air (PM2.5)', sub: `${R.years[0]}–${R.years[R.years.length - 1]} · NASA MERRA-2, yearly mean of dust, sea salt, black and organic carbon, sulfate`, kind: 'line', xs: lineYears(R.years), series: [{ name: 'Yearly mean', color: C.cyan, values: R.annual }], trend: line,
+      refs: [{ v: 15, label: 'Moderate 15' }, { v: 35, label: 'High 35' }], shade: { i0: Math.max(0, R.annual.length - 5), i1: R.annual.length - 1, label: 'Last 5 years' }, unit: 'µg/m³', dec: 1, yMin: 0,
+      alt: 'Yearly mean fine-particle (PM2.5) concentration from NASA MERRA-2 with the moderate and high thresholds' });
+    const mo = R.monthly_clim || [];
+    if (mo.length === 12 && mo.every(v => v != null)) out.charts.push({ title: 'Which months have the cleanest air', sub: 'Average PM2.5 by calendar month, last 10 years · NASA MERRA-2', kind: 'bars', xs: ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], series: [{ name: 'PM2.5', color: C.cyan, values: mo }],
+      refs: [{ v: 15, label: 'Moderate 15' }], unit: 'µg/m³', dec: 1, yMin: 0, alt: 'Average fine-particle concentration for each calendar month' });
+    out.analysis.push(`The last five years averaged ${f(last5, 1)} µg/m³ against ${f(all, 1)} µg/m³ over the whole record.`);
+    if (sl != null) out.analysis.push(`Trend ${sg(R.trend_per_decade, 2)} µg/m³ per decade (${R.significant ? 'statistically significant' : 'not significant'}).`);
+    out.analysis.push(`What the particles are made of (last five years): dust ${f(c.dust, 1)}, sulfate ${f(c.so4, 1)}, organic carbon ${f(c.oc, 1)}, sea salt ${f(c.salt, 1)}, black carbon ${f(c.bc, 1)} µg/m³.`);
+    out.analysis.push(`Highest year: ${R.years[hi]} at ${f(R.annual[hi], 1)} µg/m³. ${nMod} of ${R.annual.length} years were at or above the moderate level (15 µg/m³).`);
+    out.note = 'NASA MERRA-2 is a model constrained by satellite and ground observations on a 50 km grid. It shows regional air quality well but smooths out cities and traffic, and it does not include gases such as NO₂ or ozone.';
+  } else if (id === 'dust') {
     const D = A.dust; if (!D || !D.annual?.length) return out;
     const sl = D.trend_per_decade != null ? D.trend_per_decade / 10 : null, line = sl != null ? withTrendAt(senLine(D.years, D.annual, sl), D.years) : null;
     if (line) line.label = `Trend ${sg(sl * 10, 2)} µg/m³ per decade`;
