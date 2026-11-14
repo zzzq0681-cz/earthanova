@@ -613,11 +613,17 @@ function renderTowerDetail(){
     <div class="meter" role="img" aria-label="Risk score ${r.score} out of 100"><span style="width:${r.score}%;background:${lv[1]}"></span></div>
     <p class="td-head">${esc(r.headline)}</p><p class="td-exp">${esc(r.explain)}</p>
     ${r.metrics.length ? `<div class="kv">${r.metrics.map(m => `<div><span>${esc(m[0])}</span><b>${esc(m[1])}</b></div>`).join('')}</div>` : ''}
-    ${figs ? `<section class="hz-charts" aria-label="Charts for ${esc(h.name)}">${figs}</section>` : (r.level === 'na' ? '' : '<p class="td-exp">No chart is available for this tower with the data loaded.</p>')}
-    ${viz.analysis.length ? `<h4>Analysis</h4><ul class="hz-analysis">${viz.analysis.map(t => `<li>${esc(t)}</li>`).join('')}</ul>${viz.note ? `<p class="hz-note">${esc(viz.note)}</p>` : ''}` : ''}
     ${r.items.length ? `<h4>Recent events</h4><ul class="list">${r.items.map(e => `<li><div class="grow"><b>${esc(e.title)}</b><span>${esc(e.meta)}</span></div>${e.url ? `<a class="link-btn" href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.tag || 'USGS')}</a>` : ''}</li>`).join('')}</ul>` : ''}
     <p class="td-src">Source: ${esc(h.src)}. Screening only. This is not an official hazard assessment or warning system.</p>`;
-  wireHzCharts($('#towerDetail'), tips);
+  const vz = $('#towerViz');
+  if(vz){
+    const n = viz.charts.length;
+    vz.innerHTML = n ? `<div class="hz-board-h"><span class="td-ic" style="color:${lv[1]}">${ic(h.icon)}</span><div><p class="td-code">${h.code} · ${h.hazard}</p><h3>${h.name}: charts and analysis</h3></div><span class="lvl lvl-${r.level}">${lv[0]}</span></div>
+      <div class="hz-grid n${Math.min(n, 2)}" aria-label="Charts for ${esc(h.name)}">${figs}
+        ${viz.analysis.length ? `<section class="hz-card hz-ana"><h4>Analysis</h4><ul class="hz-analysis">${viz.analysis.map(t => `<li>${esc(t)}</li>`).join('')}</ul>${viz.note ? `<p class="hz-note">${esc(viz.note)}</p>` : ''}</section>` : ''}</div>`
+      : (r.level === 'na' ? '' : `<div class="hz-board-h"><div><h3>${h.name}</h3></div></div><p class="td-exp">No chart is available for this tower with the data loaded.</p>`);
+    wireHzCharts(vz, tips);
+  }
 }
 function renderRisk(){
   const has = !!S.A;

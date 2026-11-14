@@ -535,13 +535,16 @@ export default function EarthanovaMarkup() {
                 </div>
               </header>
               <div className="risk" id="riskWrap">
-                <div className="risk-scroll">
-                  <div className="risk-stage" id="riskStage">
-                    <div className="risk-map mosaic" id="riskMap" data-z="12" data-src="live" />
-                    <div className="inset-tint" />
-                    <svg className="risk-svg" id="riskSvg" viewBox="0 0 800 560" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Six hazard towers scanning the selected region" />
+                <div className="risk-main">
+                  <div className="risk-scroll">
+                    <div className="risk-stage" id="riskStage">
+                      <div className="risk-map mosaic" id="riskMap" data-z="12" data-src="live" />
+                      <div className="inset-tint" />
+                      <svg className="risk-svg" id="riskSvg" viewBox="0 0 800 560" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Six hazard towers scanning the selected region" />
+                    </div>
+                    <p className="risk-hint">Swipe sideways to see all six towers</p>
                   </div>
-                  <p className="risk-hint">Swipe sideways to see all six towers</p>
+                  <div className="risk-viz" id="towerViz" aria-live="polite" />
                 </div>
                 <aside className="risk-side">
                   <div className="risk-sum">
