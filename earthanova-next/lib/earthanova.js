@@ -529,6 +529,7 @@ function hazardReadings(A, I){
   }
   const Sx = A.sea;
   if(!Sx) H.sea = {level:'na', score:0, headline:'NASA sea-level data unavailable', explain:`The NASA-SSH altimetry series could not be loaded for this point${hzNote}.`, metrics:[], items:[]};
+  else if(Sx.available && Sx.distance_km > 50) H.sea = {level:'na', score:0, headline:'Not coastal, no open ocean nearby', explain:`The nearest NASA-SSH open-ocean cell is ${Sx.distance_km} km away, too far to say anything about sea level at this location. This tower is not rated here.`, metrics:[], items:[]};
   else if(!Sx.available) H.sea = {level:'na', score:0, headline:/Inland/.test(Sx.reason || '') ? 'Inland location, no open ocean nearby' : 'Sea-level data unavailable', explain:(Sx.reason || 'No altimetry data.') + ' Satellite altimetry only covers the open ocean, so this tower is not rated here.', metrics:[], items:[]};
   else {
     const tr = Sx.trend_mm_per_year, ar = Sx.annual_mm, rise = ar.length >= 6 ? mean(ar.slice(-3)) - mean(ar.slice(0, 3)) : null;
