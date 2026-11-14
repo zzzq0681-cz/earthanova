@@ -2,7 +2,7 @@
  * It drives the server-rendered markup in components/EarthanovaMarkup.tsx imperatively,
  * and is loaded once, client-side only, by components/EarthanovaClient.tsx. */
 import Globe from 'globe.gl';
-import {towerViz, renderChart, wireCharts} from './hazard-charts.js';
+import {towerViz, renderChart as renderHzChart, wireCharts as wireHzCharts} from './hazard-charts.js';
 import {eonetEvents, nasaHazards, nasaWindow, nasaFind, nasaEnsure, nasaLoad, nasaBuildAnalysis, isStatic, reportUrl} from './nasa-data.js';
 
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
@@ -607,7 +607,7 @@ function renderTowerDetail(){
   let viz = {charts:[], analysis:[], note:''}, figs = '', tips = {};
   try{
     const pd = per(S.A); viz = towerViz(h.id, S.A, {years:pd.years, baseLabel:pd.baseLabel, curLabel:pd.curLabel});
-    figs = viz.charts.map((c, i) => { const o = renderChart(c, `${h.id}${i}`); tips[`${h.id}${i}`] = o.tips; return o.html; }).join('');
+    figs = viz.charts.map((c, i) => { const o = renderHzChart(c, `${h.id}${i}`); tips[`${h.id}${i}`] = o.tips; return o.html; }).join('');
   }catch(e){ console.warn('hazard charts', e); }
   $('#towerDetail').innerHTML = `<header><span class="td-ic" style="color:${lv[1]}">${ic(h.icon)}</span><div><p class="td-code">${h.code} · ${h.hazard}</p><h3>${h.name}</h3></div><span class="lvl lvl-${r.level}">${lv[0]}</span></header>
     <div class="meter" role="img" aria-label="Risk score ${r.score} out of 100"><span style="width:${r.score}%;background:${lv[1]}"></span></div>
@@ -617,7 +617,7 @@ function renderTowerDetail(){
     ${viz.analysis.length ? `<h4>Analysis</h4><ul class="hz-analysis">${viz.analysis.map(t => `<li>${esc(t)}</li>`).join('')}</ul>${viz.note ? `<p class="hz-note">${esc(viz.note)}</p>` : ''}` : ''}
     ${r.items.length ? `<h4>Recent events</h4><ul class="list">${r.items.map(e => `<li><div class="grow"><b>${esc(e.title)}</b><span>${esc(e.meta)}</span></div>${e.url ? `<a class="link-btn" href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.tag || 'USGS')}</a>` : ''}</li>`).join('')}</ul>` : ''}
     <p class="td-src">Source: ${esc(h.src)}. Screening only. This is not an official hazard assessment or warning system.</p>`;
-  wireCharts($('#towerDetail'), tips);
+  wireHzCharts($('#towerDetail'), tips);
 }
 function renderRisk(){
   const has = !!S.A;
