@@ -221,7 +221,7 @@ export default function EarthanovaMarkup() {
                   <i data-ic="pulse" />
                   <div>
                     <b id="sbSrc">NASA POWER</b>
-                    <span>USGS · CAMS</span>
+                    <span>MERRA-2 · CERES</span>
                   </div>
                 </div>
                 <button className="chip ok" id="sbChip" title="Re-fetch data from the sources"><i data-ic="check" /><span>Data ready</span></button>
@@ -241,8 +241,8 @@ export default function EarthanovaMarkup() {
               <ol className="sp-steps" id="spSteps">
                 <li data-k="era5">NASA POWER climate record 2019–2025 <small>MERRA-2</small></li>
                 <li data-k="cmip">NASA climate projections <small>not loaded yet</small></li>
-                <li data-k="hazard">Hazards &amp; elevation <small>USGS · Copernicus DEM</small></li>
-                <li data-k="air">Air quality <small>CAMS</small></li>
+                <li data-k="hazard">Hazards &amp; elevation <small>not loaded yet</small></li>
+                <li data-k="air">Air quality <small>not loaded yet</small></li>
                 <li data-k="img">Historical imagery <small>Esri Wayback</small></li>
               </ol>
               <p className="sp-note" id="spNote">Fetching open datasets for this point.</p>

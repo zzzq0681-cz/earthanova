@@ -244,7 +244,7 @@ function interpret(A){
   const dHot = A.cur.hot != null && A.base.hot != null ? round(A.cur.hot - A.base.hot, 1) : null;
   const flags = [];
   if(dT != null && dT >= 0.5) flags.push({k:'climate', t:`Warming ${sgn(dT)} °C`});
-  if(dRain != null && dRain <= -15) flags.push({k:'water', t:`Rainfall ${sgn(dRain,0)}% (drought signal)`});
+  if(dRain != null && dRain <= -15) flags.push({k:'water', t:`Rainfall ${sgn(dRain,0)}% vs baseline (short windows, check the long-term trend)`});
   if(dRain != null && dRain >= 20) flags.push({k:'water', t:`Rainfall ${sgn(dRain,0)}% (flood review)`});
   if(dHot != null && dHot >= 5) flags.push({k:'land', t:`Hot days ${sgn(dHot,0)}/yr`});
   if(A.elev != null && A.elev > 0 && A.elev < 10) flags.push({k:'hazard', t:`Low-lying (${Math.round(A.elev)} m)`});
@@ -696,7 +696,7 @@ function plainSummary(A, I){
   const head = dT == null ? `Here is what we found for ${n}.` : dT >= 0.3 ? `${n} is getting warmer.` : dT <= -0.3 ? `${n} has been a little cooler lately.` : `${n}'s temperature has stayed about the same.`;
   const pts = [];
   if(dT != null) pts.push({icon:'thermo', text:Math.abs(dT) < 0.3 ? `Average temperature is about the same as in ${per(A).baseLabel}.` : `The average temperature is ${Math.abs(dT).toFixed(1)} °C ${dT > 0 ? 'higher' : 'lower'} than in ${per(A).baseLabel}.`});
-  if(I.dRain != null) pts.push({icon:'drop', text:I.dRain <= -10 ? `Less rain falls each year (${Math.abs(I.dRain)}% less than before).` : I.dRain >= 10 ? `More rain falls each year (${I.dRain}% more than before).` : 'The amount of yearly rain is about the same as before.'});
+  if(I.dRain != null) pts.push({icon:'drop', text:I.dRain <= -10 ? `Recent years were drier: ${Math.abs(I.dRain)}% less rain than ${per(A).baseLabel}. Short windows, a few wet years can dominate.` : I.dRain >= 10 ? `Recent years were wetter: ${I.dRain}% more rain than ${per(A).baseLabel}. Short windows, a few wet years can dominate.` : 'The amount of yearly rain is about the same as before.'});
   pts.push({icon:'wind', text:!A.aq ? 'Air quality data is not available here right now.' : A.aq.pm25 <= 15 ? 'The air is clean (fine dust is low).' : A.aq.pm25 <= 35 ? 'The air is a little dusty. Sensitive people may notice.' : 'The air is quite dusty. Limit long outdoor exercise on bad days.'});
   const sol = A.cur.solar ?? A.base.solar;
   if(sol != null) pts.push({icon:'sun', text:sol >= 5 ? 'It is very sunny here, which is great for solar power.' : sol >= 4 ? 'There is a fair amount of sun for solar power.' : 'Sunshine is on the lower side for solar power.'});
