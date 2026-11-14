@@ -77,6 +77,12 @@ export async function nasaLoad(name) {
 /* Dust (NASA MERRA-2) and sea level (NASA-SSH). The server fetches them from NASA once per place (about 1-2 min), then serves them from its database. */
 export const nasaHazards = name => apiGet(`/places/${encodeURIComponent(name)}/hazards`, 300000);
 
+/* Climate of a date window averaged over the last 5 complete years (NASA POWER daily; rain from IMERG when the place is stored). */
+export const nasaWindow = (lat, lon, start, end) => {
+  if (isStatic()) return Promise.reject(new Error('this needs the live server'));
+  return apiGet(`/window?lat=${lat}&lon=${lon}&start=${start}&end=${end}`, 120000);
+};
+
 export const reportUrl = (name, kind) => `${apiBase()}/places/${encodeURIComponent(name)}/report.${kind}`;
 
 /* Same shape as buildAnalysis() in earthanova.js, so every existing panel keeps working.
@@ -133,7 +139,7 @@ export async function eonetEvents(lat, lon, radiusKm, period) {
   const c = (v, a, b) => Math.max(a, Math.min(b, v));
   const bbox = [c(lon - dLon, -180, 180), c(lat + dLat, -90, 90), c(lon + dLon, -180, 180), c(lat - dLat, -90, 90)].map(v => v.toFixed(3)).join(',');
   const url = `https://eonet.gsfc.nasa.gov/api/v3/events?category=${EONET_CATS.join(',')}&status=all&bbox=${bbox}` +
-    `&start=${period.start}-01-01&end=${period.end}-12-31&limit=1000`;
+    `&start=${period.startDate || period.start + '-01-01'}&end=${period.endDate || period.end + '-12-31'}&limit=1000`;
   const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 25000);
   let j;
   try {

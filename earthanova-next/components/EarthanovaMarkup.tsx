@@ -528,7 +528,7 @@ export default function EarthanovaMarkup() {
               <header className="page-h">
                 <div>
                   <h1><i data-ic="radar" />Risk Monitoring</h1>
-                  <p id="riskSub">One watch tower per natural hazard, all aimed at your scanned region. Hazard layers use other open sources (USGS, Open-Meteo, CAMS), not the NASA POWER climate record.</p>
+                  <p id="riskSub">One watch tower per natural hazard, all aimed at your scanned region. Hazard layers come from NASA EONET, MERRA-2, NASA-SSH and USGS.</p>
                 </div>
                 <div className="ph-actions">
                   <button className="btn-ghost" id="riskRescan"><i data-ic="refresh" />Rescan towers</button>
@@ -566,7 +566,7 @@ export default function EarthanovaMarkup() {
                 <div>
                   <h1><i data-ic="pulse" />Hazard Tracking</h1>
                   <p id="trkSub">
-                    Watch the regions you care about. Each tower follows one hazard: the next 7 days of weather and air, and the last 30 days of earthquakes.
+                    Watch the regions you care about. Each tower follows one natural hazard: earthquakes, volcanoes, storms, floods and landslides over the last 30 days, plus long-term dust and sea level from NASA.
                   </p>
                 </div>
                 <div className="ph-actions">

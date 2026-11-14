@@ -2,7 +2,7 @@
  * It drives the server-rendered markup in components/EarthanovaMarkup.tsx imperatively,
  * and is loaded once, client-side only, by components/EarthanovaClient.tsx. */
 import Globe from 'globe.gl';
-import {eonetEvents, nasaHazards, nasaFind, nasaEnsure, nasaLoad, nasaBuildAnalysis, isStatic, reportUrl} from './nasa-data.js';
+import {eonetEvents, nasaHazards, nasaWindow, nasaFind, nasaEnsure, nasaLoad, nasaBuildAnalysis, isStatic, reportUrl} from './nasa-data.js';
 
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -482,6 +482,32 @@ const HAZARDS = [
 ];
 const LEVEL = {low:['Low','#36E2B1'], moderate:['Moderate','#FFBE55'], high:['High','#FF6178'], na:['No data','#91AEC2'], scanning:['Scanning','#22D3EE']};
 const clamp = (v, a=0, b=100) => Math.max(a, Math.min(b, v));
+function dustSeaTowers(dust, sea, hzNote){
+  const H = {};
+  const D = dust;
+  if(!D || !D.annual?.length) H.dust = {level:'na', score:0, headline:'NASA dust data unavailable', explain:`The NASA MERRA-2 aerosol series could not be loaded for this point${hzNote}.`, metrics:[], items:[]};
+  else {
+    const last5 = D.annual.slice(-5), rec = mean(last5), all = mean(D.annual), tr = D.trend_per_decade;
+    H.dust = {
+      level:rec >= 25 ? 'high' : rec >= 10 ? 'moderate' : 'low', score:Math.round(clamp(rec / 25 * 100)),
+      headline:`Natural dust PM2.5 averages ${rec.toFixed(1)} µg/m³ (last ${last5.length} years)`,
+      explain:'Surface concentration of fine windblown dust (PM2.5) from NASA MERRA-2. Dust is the natural part of airborne particles: smoke, traffic and industry are not counted. Moderate at 10 µg/m³ and high at 25 µg/m³ as an annual mean (screening thresholds for this tool). It is modelled and assimilated data on a 50 km grid, not a ground measurement.',
+      metrics:[[`Last ${last5.length} years`, rec.toFixed(1) + ' µg/m³'], [`Long-term mean (${D.years[0]}–${D.years[D.years.length - 1]})`, all.toFixed(1) + ' µg/m³'], ['Trend', tr == null ? 'n/a' : `${sgn(tr, 2)} µg/m³ per decade${D.significant ? '' : ' (not significant)'}`]], items:[]};
+  }
+  const Sx = sea;
+  if(!Sx) H.sea = {level:'na', score:0, headline:'NASA sea-level data unavailable', explain:`The NASA-SSH altimetry series could not be loaded for this point${hzNote}.`, metrics:[], items:[]};
+  else if(Sx.available && Sx.distance_km > 50) H.sea = {level:'na', score:0, headline:'Not coastal, no open ocean nearby', explain:`The nearest NASA-SSH open-ocean cell is ${Sx.distance_km} km away, too far to say anything about sea level at this location. This tower is not rated here.`, metrics:[], items:[]};
+  else if(!Sx.available) H.sea = {level:'na', score:0, headline:/Inland/.test(Sx.reason || '') ? 'Inland location, no open ocean nearby' : 'Sea-level data unavailable', explain:(Sx.reason || 'No altimetry data.') + ' Satellite altimetry only covers the open ocean, so this tower is not rated here.', metrics:[], items:[]};
+  else {
+    const tr = Sx.trend_mm_per_year, ar = Sx.annual_mm, rise = ar.length >= 6 ? mean(ar.slice(-3)) - mean(ar.slice(0, 3)) : null;
+    H.sea = tr == null ? {level:'na', score:0, headline:'Sea-level trend not available', explain:'Too few complete years to fit a sea-level trend.', metrics:[], items:[]} : {
+      level:(Sx.significant && tr >= 5) ? 'high' : (Sx.significant && tr >= 3) ? 'moderate' : 'low', score:Math.round(clamp(tr / 6 * 100)),
+      headline:`Sea level near here ${tr >= 0 ? 'is rising' : 'is falling'} ${Math.abs(tr).toFixed(1)} mm/yr (${Sx.years[0]}–${Sx.years[Sx.years.length - 1]})`,
+      explain:`Absolute sea-level trend from NASA satellite altimetry (NASA-SSH, 0.5° grid) at the nearest open-ocean cell, ${Sx.distance_km} km from the target. It does not include land sinking or rising (for example river deltas), which can make the local rise larger or smaller. Moderate at 3 mm/yr and high at 5 mm/yr when statistically significant (screening thresholds for this tool).`,
+      metrics:[['Trend', `${sgn(tr, 1)} mm/yr${Sx.significant ? '' : ' (not significant)'}`], ['Change over record', rise == null ? 'n/a' : `${sgn(rise, 0)} mm`], ['Ocean cell', `${Sx.grid_lat.toFixed(2)}, ${Sx.grid_lon.toFixed(2)} (${Sx.distance_km} km)`]], items:[]};
+  }
+  return H;
+}
 function hazardReadings(A, I){
   const q = A.quakes, H = {};
   const mq = q ? q.maxMag : null;
@@ -517,28 +543,7 @@ function hazardReadings(A, I){
   const items = (list, tag) => list.slice(0, 6).map(e => ({title:e.title, meta:`${e.date} · ${e.dist} km away${e.mag ? ' · ' + e.mag : ''}`, url:e.url, tag}));
   const trunc = eo && eo.truncated ? ' (list truncated at 1000 events, true count is higher)' : '';
   const hzNote = A.hazErr ? ` (${A.hazErr})` : '';
-  const D = A.dust;
-  if(!D || !D.annual?.length) H.dust = {level:'na', score:0, headline:'NASA dust data unavailable', explain:`The NASA MERRA-2 aerosol series could not be loaded for this point${hzNote}.`, metrics:[], items:[]};
-  else {
-    const last5 = D.annual.slice(-5), rec = mean(last5), all = mean(D.annual), tr = D.trend_per_decade;
-    H.dust = {
-      level:rec >= 25 ? 'high' : rec >= 10 ? 'moderate' : 'low', score:Math.round(clamp(rec / 25 * 100)),
-      headline:`Natural dust PM2.5 averages ${rec.toFixed(1)} µg/m³ (last ${last5.length} years)`,
-      explain:'Surface concentration of fine windblown dust (PM2.5) from NASA MERRA-2. Dust is the natural part of airborne particles: smoke, traffic and industry are not counted. Moderate at 10 µg/m³ and high at 25 µg/m³ as an annual mean (screening thresholds for this tool). It is modelled and assimilated data on a 50 km grid, not a ground measurement.',
-      metrics:[[`Last ${last5.length} years`, rec.toFixed(1) + ' µg/m³'], [`Long-term mean (${D.years[0]}–${D.years[D.years.length - 1]})`, all.toFixed(1) + ' µg/m³'], ['Trend', tr == null ? 'n/a' : `${sgn(tr, 2)} µg/m³ per decade${D.significant ? '' : ' (not significant)'}`]], items:[]};
-  }
-  const Sx = A.sea;
-  if(!Sx) H.sea = {level:'na', score:0, headline:'NASA sea-level data unavailable', explain:`The NASA-SSH altimetry series could not be loaded for this point${hzNote}.`, metrics:[], items:[]};
-  else if(Sx.available && Sx.distance_km > 50) H.sea = {level:'na', score:0, headline:'Not coastal, no open ocean nearby', explain:`The nearest NASA-SSH open-ocean cell is ${Sx.distance_km} km away, too far to say anything about sea level at this location. This tower is not rated here.`, metrics:[], items:[]};
-  else if(!Sx.available) H.sea = {level:'na', score:0, headline:/Inland/.test(Sx.reason || '') ? 'Inland location, no open ocean nearby' : 'Sea-level data unavailable', explain:(Sx.reason || 'No altimetry data.') + ' Satellite altimetry only covers the open ocean, so this tower is not rated here.', metrics:[], items:[]};
-  else {
-    const tr = Sx.trend_mm_per_year, ar = Sx.annual_mm, rise = ar.length >= 6 ? mean(ar.slice(-3)) - mean(ar.slice(0, 3)) : null;
-    H.sea = tr == null ? {level:'na', score:0, headline:'Sea-level trend not available', explain:'Too few complete years to fit a sea-level trend.', metrics:[], items:[]} : {
-      level:(Sx.significant && tr >= 5) ? 'high' : (Sx.significant && tr >= 3) ? 'moderate' : 'low', score:Math.round(clamp(tr / 6 * 100)),
-      headline:`Sea level near here ${tr >= 0 ? 'is rising' : 'is falling'} ${Math.abs(tr).toFixed(1)} mm/yr (${Sx.years[0]}–${Sx.years[Sx.years.length - 1]})`,
-      explain:`Absolute sea-level trend from NASA satellite altimetry (NASA-SSH, 0.5° grid) at the nearest open-ocean cell, ${Sx.distance_km} km from the target. It does not include land sinking or rising (for example river deltas), which can make the local rise larger or smaller. Moderate at 3 mm/yr and high at 5 mm/yr when statistically significant (screening thresholds for this tool).`,
-      metrics:[['Trend', `${sgn(tr, 1)} mm/yr${Sx.significant ? '' : ' (not significant)'}`], ['Change over record', rise == null ? 'n/a' : `${sgn(rise, 0)} mm`], ['Ocean cell', `${Sx.grid_lat.toFixed(2)}, ${Sx.grid_lon.toFixed(2)} (${Sx.distance_km} km)`]], items:[]};
-  }
+  Object.assign(H, dustSeaTowers(A.dust, A.sea, hzNote));
   /* fold NASA EONET events into the towers they belong to */
   const RANK = {na:0, low:1, moderate:2, high:3};
   const fold = (r, lv, score, head, its, metric, note) => {
@@ -1342,51 +1347,55 @@ const knownPlaces = () => { const seen = new Set(); return [...(S.A ? [S.A.loc] 
 /* ---------- hazard tracking ---------- */
 const TRACK = [
   {id:'quake', code:'K-01', name:'Seismic Watch', hazard:'Earthquakes', icon:'quake'},
-  {id:'heat', code:'K-02', name:'Heat Wave Watch', hazard:'Extreme heat', icon:'flame'},
-  {id:'cold', code:'K-03', name:'Cold Snap Watch', hazard:'Freezing cold', icon:'thermo'},
-  {id:'rain', code:'K-04', name:'Heavy Rain Watch', hazard:'Floods & rain', icon:'drop'},
-  {id:'wind', code:'K-05', name:'Storm Wind Watch', hazard:'Strong wind', icon:'wind'},
-  {id:'air', code:'K-06', name:'Air Quality Watch', hazard:'Air pollution', icon:'cloud'}
+  {id:'volcano', code:'K-02', name:'Volcano Watch', hazard:'Volcanoes', icon:'flame'},
+  {id:'storm', code:'K-03', name:'Storm Watch', hazard:'Severe storms', icon:'wind'},
+  {id:'flood', code:'K-04', name:'Flood & Landslide Watch', hazard:'Floods & landslides', icon:'drop'},
+  {id:'dust', code:'K-05', name:'Dust Watch', hazard:'Windblown dust', icon:'cloud'},
+  {id:'sea', code:'K-06', name:'Sea-Level Watch', hazard:'Sea-level rise', icon:'waves'}
 ];
 const T = {sel:null, tower:0, data:{}, tok:0};
-const dayName = t => new Date(t + 'T12:00:00').toLocaleDateString(undefined, {weekday:'short'});
-function trackReadings(fc, aq, eq){
-  const R = {}, d = fc?.daily, none = (m = 'No data') => ({level:'na', score:0, headline:m, explain:'This source could not be reached. Try Refresh in a moment.', metrics:[], series:null, items:[]});
-  const mk = (level, score, headline, explain, metrics, series, items = []) => ({level, score:Math.round(clamp(score)), headline, explain, metrics, series, items});
-  const days = d ? d.time : [];
-  const ser = (arr, unit, lo, hi, dec = 0) => ({unit, lo, hi, dec, pts:days.map((t, i) => ({l:dayName(t), v:arr[i]}))});
-  if(d){
-    const mx = d.temperature_2m_max, mn = d.temperature_2m_min, pr = d.precipitation_sum, wg = d.wind_gusts_10m_max;
-    const pk = Math.max(...mx), avg = mean(mx), hotDays = mx.filter(v => v >= 35).length;
-    R.heat = mk(pk >= 40 ? 'high' : pk >= 35 ? 'moderate' : 'low', pk / 40 * 100, `Peak high ${pk.toFixed(0)} °C on ${dayName(days[mx.indexOf(pk)])}`, 'Looks at the daily maximum for the next 7 days. Moderate from 35 °C, high from 40 °C.', [['Peak', pk.toFixed(1) + ' °C'], ['Average high', avg.toFixed(1) + ' °C'], ['Days ≥ 35 °C', hotDays]], ser(mx, '°C', 0, 50));
-    const lo = Math.min(...mn);
-    R.cold = mk(lo <= -10 ? 'high' : lo <= 0 ? 'moderate' : 'low', (5 - lo) / 15 * 100, lo <= 0 ? `Low of ${lo.toFixed(0)} °C on ${dayName(days[mn.indexOf(lo)])}` : `Lowest night ${lo.toFixed(0)} °C, no frost`, 'Looks at the daily minimum for the next 7 days. Moderate at or below 0 °C, high at or below −10 °C.', [['Coldest night', lo.toFixed(1) + ' °C'], ['Frost nights', mn.filter(v => v <= 0).length], ['Average low', mean(mn).toFixed(1) + ' °C']], ser(mn, '°C', -20, 30));
-    const tot = pr.reduce((a, b) => a + (b || 0), 0), pd = Math.max(...pr.map(v => v || 0));
-    R.rain = mk((tot >= 100 || pd >= 50) ? 'high' : (tot >= 40 || pd >= 25) ? 'moderate' : 'low', Math.max(tot / 100, pd / 50) * 100, `${tot.toFixed(0)} mm expected in 7 days`, 'Adds up forecast rainfall. Moderate at 40 mm in a week or 25 mm in a day, high at 100 mm or 50 mm in a day.', [['7-day total', tot.toFixed(1) + ' mm'], ['Wettest day', pd.toFixed(1) + ' mm'], ['Wet days', pr.filter(v => v >= 1).length]], ser(pr, 'mm', 0, Math.max(30, pd), 1));
-    const g = Math.max(...wg);
-    R.wind = mk(g >= 90 ? 'high' : g >= 60 ? 'moderate' : 'low', g / 90 * 100, `Gusts up to ${g.toFixed(0)} km/h`, 'Looks at the strongest daily gust for the next 7 days. Moderate from 60 km/h, high from 90 km/h.', [['Peak gust', g.toFixed(0) + ' km/h'], ['Windy days (60+)', wg.filter(v => v >= 60).length], ['Average gust', mean(wg).toFixed(0) + ' km/h']], ser(wg, 'km/h', 0, Math.max(100, g)));
-  } else ['heat', 'cold', 'rain', 'wind'].forEach(k => { R[k] = none('Weather forecast unavailable'); });
-  if(aq?.hourly){
-    const byDay = {}; aq.hourly.time.forEach((t, i) => { const k = t.slice(0, 10), v = aq.hourly.pm2_5[i]; if(v != null) byDay[k] = Math.max(byDay[k] ?? 0, v); });
-    const ks = Object.keys(byDay), vals = ks.map(k => byDay[k]), pk = Math.max(...vals);
-    R.air = vals.length ? mk(pk > 35 ? 'high' : pk > 15 ? 'moderate' : 'low', pk / 35 * 100, `PM2.5 peaks at ${pk.toFixed(0)} µg/m³`, 'Fine particles forecast for the next 3 days. Moderate above 15 µg/m³, high above 35 µg/m³.', [['Peak PM2.5', pk.toFixed(0) + ' µg/m³'], ['Average', mean(vals).toFixed(0) + ' µg/m³'], ['WHO daily guide', '15 µg/m³']], {unit:'µg/m³', lo:0, hi:Math.max(40, pk), dec:0, pts:ks.map((k, i) => ({l:dayName(k), v:vals[i]}))}) : none('No air data');
-  } else R.air = none('Air quality unavailable');
+const TRK_DAYS = 30, TRK_KM = 300;
+const trkLoading = (m = 'Loading NASA data…') => ({level:'scanning', score:0, headline:m, explain:'Dust and sea level come from NASA archives. The first scan of a new place can take 1-2 minutes, then it is stored.', metrics:[], series:null, items:[]});
+function trackReadings(eq, eo){
+  const R = {}, none = (m, why = 'This source could not be reached. Try Refresh in a moment.') => ({level:'na', score:0, headline:m, explain:why, metrics:[], series:null, items:[]});
+  const mk = (level, score, headline, explain, metrics, items = []) => ({level, score:Math.round(clamp(score)), headline, explain, metrics, series:null, items});
   if(eq?.features){
     const f = eq.features, mq = f.length ? Math.max(...f.map(q => q.properties.mag)) : null;
-    R.quake = mk(mq >= 6 ? 'high' : mq >= 4.5 ? 'moderate' : 'low', ((mq || 3) - 3) / 3 * 100, f.length ? `${f.length} quakes of M3+ in 30 days, largest M${mq.toFixed(1)}` : 'No M3+ earthquakes in the last 30 days', 'Counts earthquakes within 300 km during the last 30 days. Moderate when the largest reaches M4.5, high at M6.', [['Events M3+', f.length], ['Largest', mq != null ? 'M' + mq.toFixed(1) : '—'], ['Window', 'Last 30 days · 300 km']], null,
-      f.slice(0, 5).map(q => ({title:`M${q.properties.mag.toFixed(1)} · ${q.properties.place || 'Unknown'}`, meta:new Date(q.properties.time).toISOString().slice(0, 10), url:q.properties.url})));
+    R.quake = mk(mq >= 6 ? 'high' : mq >= 4.5 ? 'moderate' : 'low', ((mq || 3) - 3) / 3 * 100, f.length ? `${f.length} quakes of M3+ in ${TRK_DAYS} days, largest M${mq.toFixed(1)}` : `No M3+ earthquakes in the last ${TRK_DAYS} days`, `Counts USGS earthquakes within ${TRK_KM} km. Moderate when the largest is M4.5 or more, high at M6 or more.`, [['Events M3+', f.length], ['Largest', mq != null ? 'M' + mq.toFixed(1) : '—'], ['Radius', TRK_KM + ' km']],
+      f.slice(0, 5).map(q => ({title:`M${q.properties.mag.toFixed(1)} · ${q.properties.place || 'Unknown'}`, meta:new Date(q.properties.time).toISOString().slice(0, 10), url:q.properties.url, tag:'USGS'})));
   } else R.quake = none('USGS unavailable');
+  const note = 'NASA EONET lists notable events only (GDACS, NOAA, JTWC, Smithsonian and others), so "none listed" is not proof of safety.';
+  const ev = (key, lists, label, code) => {
+    if(!eo){ R[key] = none('NASA EONET unavailable'); return; }
+    const all = lists.flatMap(k => eo.byCat[k] || []).sort((x, y) => y.date.localeCompare(x.date)), n = all.length;
+    R[key] = mk(n >= 3 ? 'high' : n >= 1 ? 'moderate' : 'low', n / 3 * 100, n ? `${n} ${label} event${n > 1 ? 's' : ''} in ${TRK_DAYS} days` : `No ${label} events listed in ${TRK_DAYS} days`, `NASA EONET events within ${TRK_KM} km over the last ${TRK_DAYS} days. Moderate at 1 event, high at 3 or more. ${note}`, [['Events', n], ['Radius', TRK_KM + ' km'], ['Window', TRK_DAYS + ' days']], all.slice(0, 6).map(e => ({title:e.title, meta:`${e.date} · ${e.dist} km away${e.mag ? ' · ' + e.mag : ''}`, url:e.url, tag:'NASA EONET'})));
+  };
+  ev('volcano', ['volcanoes'], 'volcano'); ev('storm', ['severeStorms'], 'severe storm'); ev('flood', ['floods', 'landslides'], 'flood or landslide');
+  R.dust = trkLoading(); R.sea = trkLoading();
   return R;
 }
-async function fetchTrack(l, force){
+async function fetchTrack(l, force, onUpdate){
   const c = T.data[l.id]; if(c && !force && Date.now() - c.at < 9e5) return c;
-  const q = `latitude=${l.lat}&longitude=${l.lon}`, since = new Date(Date.now() - 30*864e5).toISOString().slice(0, 10);
-  const [fc, aq, eq] = await Promise.allSettled([
-    getJSON(`https://api.open-meteo.com/v1/forecast?${q}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,wind_gusts_10m_max&forecast_days=7&timezone=auto`, 15000),
-    getJSON(`https://air-quality-api.open-meteo.com/v1/air-quality?${q}&hourly=pm2_5&forecast_days=3&timezone=auto`, 15000),
-    getJSON(`https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&${q}&maxradiuskm=300&starttime=${since}&minmagnitude=3&orderby=magnitude&limit=100`, 15000)
+  const q = `latitude=${l.lat}&longitude=${l.lon}`, now = Date.now(), since = new Date(now - TRK_DAYS*864e5).toISOString().slice(0, 10), today = new Date(now).toISOString().slice(0, 10);
+  const [eq, eo] = await Promise.allSettled([
+    getJSON(`https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&${q}&maxradiuskm=${TRK_KM}&starttime=${since}&minmagnitude=3&orderby=magnitude&limit=100`, 15000),
+    eonetEvents(l.lat, l.lon, TRK_KM, {startDate:since, endDate:today})
   ]);
-  const d = {at:Date.now(), R:trackReadings(fc.value, aq.value, eq.value)}; T.data[l.id] = d; return d;
+  const d = {at:now, R:trackReadings(eq.value, eo.value)}; T.data[l.id] = d;
+  /* dust and sea level are slow the first time (server fetches NASA archives), so they fill in afterwards */
+  (async () => {
+    try{
+      const hit = await nasaEnsure(l.lat, l.lon, l.short || l.name), hz = await nasaHazards(hit.place.name);
+      Object.assign(d.R, dustSeaTowers(hz.dust, hz.sea, ''));
+    }catch(e){
+      const m = (e && e.message) || 'unavailable';
+      d.R.dust = {level:'na', score:0, headline:'NASA dust data unavailable', explain:`The NASA server could not load this series (${m}). Try Refresh later.`, metrics:[], series:null, items:[]};
+      d.R.sea = {...d.R.dust, headline:'NASA sea-level data unavailable'};
+    }
+    ['dust', 'sea'].forEach(k => { d.R[k].series = null; });
+    if(onUpdate) onUpdate();
+  })();
+  return d;
 }
 function addTracked(l){
   const list = trackList(); if(list.some(x => x.id === l.id)){ toast(`${l.short || l.name} is already tracked.`); return false; }
@@ -1406,8 +1415,8 @@ async function renderTracking(force){
   if(!list.some(r => r.id === T.sel)) T.sel = list[0].id;
   $('#trkChips').querySelectorAll('[data-trk-sel]').forEach(b => b.setAttribute('aria-selected', b.dataset.trkSel === T.sel));
   drawTrackStage(); renderTrackMatrix(list);
-  await Promise.all(list.map(async r => { try{ await fetchTrack(r, force); }catch{} if(tok !== T.tok) return; renderTrackMatrix(list); if(r.id === T.sel) drawTrackStage(); }));
-  if(tok === T.tok){ const t0 = Math.min(...list.map(r => T.data[r.id]?.at || Date.now())); $('#trkSub').textContent = `Watching ${list.length} region${list.length > 1 ? 's' : ''}. Weather and air: next 7 days. Earthquakes: last 30 days. Updated ${ago(t0)}.`; }
+  await Promise.all(list.map(async r => { try{ await fetchTrack(r, force, () => { if(tok === T.tok){ renderTrackMatrix(list); if(r.id === T.sel) drawTrackStage(); } }); }catch{} if(tok !== T.tok) return; renderTrackMatrix(list); if(r.id === T.sel) drawTrackStage(); }));
+  if(tok === T.tok){ const t0 = Math.min(...list.map(r => T.data[r.id]?.at || Date.now())); $('#trkSub').textContent = `Watching ${list.length} region${list.length > 1 ? 's' : ''}. Earthquakes, volcanoes, storms, floods and landslides: last 30 days. Dust and sea level: NASA long-term records. Updated ${ago(t0)}.`; }
 }
 function renderTrackMatrix(list){
   $('#trkMatrix').innerHTML = `<table class="tbl mx"><thead><tr><th>Region</th>${TRACK.map(t => `<th title="${t.name}">${ic(t.icon)}<span class="mx-n">${t.hazard}</span></th>`).join('')}</tr></thead><tbody>${list.map(r => { const d = T.data[r.id]; return `<tr class="${r.id === T.sel ? 'sel' : ''}"><td><button class="link-btn" data-trk-sel="${esc(r.id)}">${esc(r.short)}</button></td>${TRACK.map((t, i) => { const lv = d ? d.R[t.id].level : 'scanning'; return `<td><button class="mx-c" data-trk-sel="${esc(r.id)}" data-trk-tower="${i}"><span class="lvl lvl-${lv}">${LEVEL[lv][0]}</span></button></td>`; }).join('')}</tr>`; }).join('')}</tbody></table>`;
@@ -1431,7 +1440,7 @@ function renderTrackDetail(){
     <div class="meter" role="img" aria-label="Threat score ${x.score} out of 100"><span style="width:${x.score}%;background:${lv[1]}"></span></div><p class="td-head">${esc(x.headline)}</p><p class="td-exp">${esc(x.explain)}</p>${bars}
     ${x.metrics.length ? `<div class="kv">${x.metrics.map(m => `<div><span>${esc(m[0])}</span><b>${esc(m[1])}</b></div>`).join('')}</div>` : ''}
     ${x.items.length ? `<h4>Latest events</h4><ul class="list">${x.items.map(e => `<li><div class="grow"><b>${esc(e.title)}</b><span>${esc(e.meta)}</span></div>${e.url ? `<a class="link-btn" href="${esc(e.url)}" target="_blank" rel="noopener">USGS</a>` : ''}</li>`).join('')}</ul>` : ''}
-    <p class="td-src">Sources: Open-Meteo forecast and CAMS air quality, USGS earthquakes. Updated ${ago(d.at)}. Screening only, not an official warning.</p>`;
+    <p class="td-src">Sources: USGS earthquakes, NASA EONET events, NASA MERRA-2 dust, NASA-SSH sea level. Updated ${ago(d.at)}. Screening only, not an official warning.</p>`;
 }
 function initTrackingPage(){
   placePicker($('#trkInput'), $('#trkResults'), (l, inp) => { inp.value = ''; if(addTracked(l)){ T.sel = l.id; toast(`Now tracking ${l.short}.`); renderTracking(); } });
@@ -1466,29 +1475,24 @@ function renderCompare(){
 }
 const mdNum = d => (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
 async function placeData(l, win){
-  const q = `latitude=${l.lat}&longitude=${l.lon}`, y0 = LAST_YEAR - 4, today = isoDay(new Date()), far = isoDay(new Date(Date.now() + 15*864e5));
+  const q = `latitude=${l.lat}&longitude=${l.lon}`, today = isoDay(new Date()), far = isoDay(new Date(Date.now() + 15*864e5));
   const near = win.start <= far && win.end >= today;
-  const [arc, eq, aq, el, fc] = await Promise.allSettled([
-    getJSON(`https://archive-api.open-meteo.com/v1/archive?${q}&start_date=${y0}-01-01&end_date=${LAST_YEAR}-12-31&daily=temperature_2m_mean,temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=UTC`, 40000),
+  const dustP = nasaEnsure(l.lat, l.lon, l.short || l.name).then(hit => nasaHazards(hit.place.name));   // slow the first time for a new place
+  const [clm, eq, dst, fc] = await Promise.allSettled([
+    nasaWindow(l.lat, l.lon, win.start, win.end),
     getJSON(`https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&${q}&maxradiuskm=200&starttime=${LAST_YEAR - 9}-01-01&minmagnitude=4.5&orderby=magnitude&limit=500`, 15000),
-    getJSON(`https://air-quality-api.open-meteo.com/v1/air-quality?${q}&hourly=pm2_5&past_days=92&forecast_days=0`, 15000),
-    getJSON(`https://api.open-meteo.com/v1/elevation?${q}`, 12000),
+    dustP,
     near ? getJSON(`https://api.open-meteo.com/v1/forecast?${q}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,wind_gusts_10m_max&start_date=${win.start < today ? today : win.start}&end_date=${win.end > far ? far : win.end}&timezone=auto`, 15000) : Promise.reject(new Error('far'))
   ]);
-  if(arc.status !== 'fulfilled') throw new Error(`Climate history for ${l.short} could not be loaded.`);
-  const d = arc.value.daily, s = mdNum(new Date(win.start + 'T00:00:00Z')), e = mdNum(new Date(win.end + 'T00:00:00Z'));
-  const inWin = md => s <= e ? md >= s && md <= e : md >= s || md <= e;
-  const rows = d.time.map((t, i) => ({md:mdNum(new Date(t + 'T00:00:00Z')), t:d.temperature_2m_mean[i], hi:d.temperature_2m_max[i], lo:d.temperature_2m_min[i], p:d.precipitation_sum[i]})).filter(r => inWin(r.md) && r.t != null);
-  if(!rows.length) throw new Error('No climate days found for those dates.');
-  const n = rows.length, lenDays = Math.max(1, Math.round((new Date(win.end) - new Date(win.start)) / 864e5) + 1);
-  const clim = {meanT:mean(rows.map(r => r.t)), hi:mean(rows.map(r => r.hi)), lo:mean(rows.map(r => r.lo)), rainPerDay:mean(rows.map(r => r.p ?? 0)), wetFrac:rows.filter(r => (r.p ?? 0) >= 1).length / n, hotFrac:rows.filter(r => r.hi >= 35).length / n, coldFrac:rows.filter(r => r.lo <= 0).length / n, lenDays};
-  clim.rainTotal = clim.rainPerDay * lenDays;
+  if(clm.status !== 'fulfilled') throw new Error(`NASA climate history for ${l.short} could not be loaded${clm.reason?.message ? ` (${clm.reason.message})` : ''}.`);
+  const clim = clm.value; clim.rainTotal = clim.rainPerDay * clim.lenDays;
   const f = eq.status === 'fulfilled' ? eq.value.features || [] : null;
   const quakes = f ? {perYear:f.length / 10, count:f.length, max:f.length ? Math.max(...f.map(q => q.properties.mag)) : null} : null;
-  const pm = aq.status === 'fulfilled' && aq.value.hourly ? mean(aq.value.hourly.pm2_5) : null;
+  const dustA = dst.status === 'fulfilled' ? dst.value.dust?.annual : null;
+  const dust = dustA && dustA.length ? mean(dustA.slice(-5)) : null;
   const fd = fc.status === 'fulfilled' ? fc.value.daily : null;
   const fcast = fd && fd.time.length ? {n:fd.time.length, hi:mean(fd.temperature_2m_max), lo:mean(fd.temperature_2m_min), rain:fd.precipitation_sum.reduce((a, b) => a + (b || 0), 0), gust:Math.max(...fd.wind_gusts_10m_max)} : null;
-  return {loc:l, clim, quakes, pm25:pm, elev:el.status === 'fulfilled' ? el.value.elevation?.[0] ?? null : null, fcast};
+  return {loc:l, clim, quakes, dust, elev:null, fcast};
 }
 function scorePlace(d, pref, purpose){
   const c = d.clim, [lo, hi] = PREF[pref], dist = c.meanT < lo ? lo - c.meanT : c.meanT > hi ? c.meanT - hi : 0;
@@ -1496,7 +1500,7 @@ function scorePlace(d, pref, purpose){
   P.comfort = {score:clamp(100 - dist * 8 - Math.max(0, c.hi - 36) * 3), w:{trip:.30, relocate:.25}};
   P.rain = {score:clamp(100 - c.rainPerDay * 12 - c.wetFrac * 20), w:{trip:.20, relocate:.10}};
   P.extreme = {score:clamp(100 - c.hotFrac * 220 - c.coldFrac * 160), w:{trip:.15, relocate:.15}};
-  P.air = {score:d.pm25 == null ? 60 : clamp(100 - (d.pm25 - 10) / 50 * 100), w:{trip:.10, relocate:.25}};
+  P.air = {score:d.dust == null ? 60 : clamp(100 - d.dust * 2.5), w:{trip:.10, relocate:.25}};
   P.seismic = {score:d.quakes ? clamp(100 - d.quakes.perYear * 5 - ((d.quakes.max || 0) >= 7 ? 20 : 0)) : 70, w:{trip:.15, relocate:.20}};
   if(d.elev != null && d.elev > 2000) P.altitude = {score:clamp(100 - (d.elev - 2000) / 25), w:{trip:.10, relocate:.05}};
   let tw = 0, ts = 0; Object.values(P).forEach(p => { const w = p.w[purpose]; tw += w; ts += w * p.score; });
@@ -1506,14 +1510,14 @@ const CMP_METRICS = [
   ['comfort', 'Typical temperature', d => `${d.clim.meanT.toFixed(1)} °C <small>(high ${d.clim.hi.toFixed(0)} · low ${d.clim.lo.toFixed(0)})</small>`],
   ['rain', 'Rain in your dates', d => `${d.clim.rainTotal.toFixed(0)} mm <small>(${Math.round(d.clim.wetFrac * 100)}% wet days)</small>`],
   ['extreme', 'Extreme heat / cold days', d => `${Math.round(d.clim.hotFrac * 100)}% hot · ${Math.round(d.clim.coldFrac * 100)}% freezing`],
-  ['air', 'Air quality (PM2.5)', d => d.pm25 == null ? 'No data' : `${d.pm25.toFixed(0)} µg/m³`],
+  ['air', 'Natural dust (PM2.5, yearly mean)', d => d.dust == null ? 'No data' : `${d.dust.toFixed(1)} µg/m³`],
   ['seismic', 'Earthquake activity', d => d.quakes ? `${d.quakes.perYear.toFixed(1)} M4.5+ / yr${d.quakes.max ? ` <small>(max M${d.quakes.max.toFixed(1)})</small>` : ''}` : 'No data'],
   ['altitude', 'Altitude', d => d.elev == null ? '—' : `${Math.round(d.elev)} m`]
 ];
 function advise(a, b, sa, sb, win, purpose){
   const diff = sb.total - sa.total, flags = [], pros = [], cons = [], tips = [], c = b.clim;
   if(b.quakes && ((b.quakes.max || 0) >= 6.5 || b.quakes.perYear >= 15)) flags.push(`${b.loc.short} has high earthquake activity.`);
-  if(b.pm25 != null && b.pm25 > 55) flags.push(`Air in ${b.loc.short} is heavily polluted (PM2.5 ${b.pm25.toFixed(0)}).`);
+  if(b.dust != null && b.dust > 40) flags.push(`${b.loc.short} is very dusty: windblown dust averages ${b.dust.toFixed(0)} µg/m³ (PM2.5).`);
   if(c.hotFrac > .35) flags.push(`More than a third of your days in ${b.loc.short} reach 35 °C or more.`);
   if(c.coldFrac > .4) flags.push(`Many nights in ${b.loc.short} fall below freezing.`);
   if(b.elev != null && b.elev > 2500) flags.push(`${b.loc.short} is high (${Math.round(b.elev)} m): altitude sickness is possible.`);
@@ -1521,7 +1525,7 @@ function advise(a, b, sa, sb, win, purpose){
   if(c.hotFrac > .15 || c.hi >= 33) tips.push('Pack light clothing, sunscreen and a water bottle; plan outdoor activity for early morning or evening.');
   if(c.rainPerDay > 2.5 || c.wetFrac > .4) tips.push('Bring a rain jacket and keep plans flexible for wet days.');
   if(c.coldFrac > .1 || c.lo <= 3) tips.push('Bring warm layers for the evenings.');
-  if(b.pm25 != null && b.pm25 > 35) tips.push('Consider an N95 mask on dusty days, especially for children or asthma.');
+  if(b.dust != null && b.dust > 25) tips.push('Consider an N95 mask on dusty days, especially for children or asthma.');
   if(b.quakes && b.quakes.perYear >= 3) tips.push('Check how your accommodation handles earthquakes and note the exits.');
   let level;
   if(purpose === 'trip') level = sb.total >= 70 ? 'good' : sb.total >= 50 ? 'ok' : 'bad';
@@ -1540,7 +1544,7 @@ async function runCompare(){
   if(CMP.from.id === CMP.to.id){ err.textContent = 'Pick two different places.'; return; }
   if(!CMP.start || !CMP.end || CMP.end < CMP.start){ err.textContent = 'Choose travel dates (the end date must be after the start).'; return; }
   if((new Date(CMP.end) - new Date(CMP.start)) / 864e5 > 90){ err.textContent = 'Please choose a window of 90 days or less.'; return; }
-  const win = {start:CMP.start, end:CMP.end}; $('#cmpOut').innerHTML = '<div class="card cmp-load"><div class="spinner"></div><p>Comparing climate, air and earthquake history for both places…</p></div>';
+  const win = {start:CMP.start, end:CMP.end}; $('#cmpOut').innerHTML = '<div class="card cmp-load"><div class="spinner"></div><p>Comparing NASA climate, dust and earthquake history for both places. A new place can take 1-2 minutes the first time…</p></div>';
   try{
     const [a, b] = await Promise.all([placeData(CMP.from, win), placeData(CMP.to, win)]);
     CMP.res = {a, b, win, purpose:CMP.purpose, pref:CMP.pref, at:Date.now()}; showCompare(CMP.res);
@@ -1556,7 +1560,7 @@ function showCompare(r){
   const dd = x => new Date(x + 'T12:00:00').toLocaleDateString();
   $('#cmpOut').innerHTML = `<div class="cmp-verdict v-${v.level}"><span class="v-ic">${ic(v.level === 'good' ? 'check' : 'alert')}</span><div><p class="v-k">${r.purpose === 'trip' ? 'Trip advice' : 'Relocation advice'} · ${dd(win.start)} to ${dd(win.end)}</p><h2>${esc(v.head)}</h2><p>${esc(a.loc.short)} scores ${sa.total} and ${esc(b.loc.short)} scores ${sb.total} (${v.diff >= 0 ? '+' : '−'}${Math.abs(v.diff)} for your destination).</p></div></div>
     <div class="cmp-cards">${sc(a, sa)}${sc(b, sb)}</div>
-    <div class="card"><div class="tbl-scroll"><table class="tbl cmp-tbl"><thead><tr><th></th><th>${esc(a.loc.short)} <small>(from)</small></th><th>${esc(b.loc.short)} <small>(to)</small></th></tr></thead><tbody>${rows}</tbody></table></div><p class="muted">Climate values are averages for the same dates over ${LAST_YEAR - 4}–${LAST_YEAR} (ERA5), so they describe what is typical, not a forecast${a.fcast || b.fcast ? ' (a short forecast is shown when your dates are near)' : ''}. A check mark means clearly better.</p></div>
+    <div class="card"><div class="tbl-scroll"><table class="tbl cmp-tbl"><thead><tr><th></th><th>${esc(a.loc.short)} <small>(from)</small></th><th>${esc(b.loc.short)} <small>(to)</small></th></tr></thead><tbody>${rows}</tbody></table></div><p class="muted">Climate values are averages for the same dates over ${LAST_YEAR - 4}–${LAST_YEAR} (NASA POWER daily; rain from NASA GPM IMERG when the place is stored, otherwise POWER), so they describe what is typical, not a forecast${a.fcast || b.fcast ? ' (the short forecast shown is from Open-Meteo, not NASA)' : ''}. Dust is the natural part of airborne particles from NASA MERRA-2; earthquakes are from USGS. A check mark means clearly better.</p></div>
     <div class="cmp-notes">${v.flags.length ? `<section class="card"><h3>${ic('alert')}Watch out</h3><ul class="notes">${li(v.flags, 'alert', 'bad')}</ul></section>` : ''}${(v.pros.length || v.cons.length) ? `<section class="card"><h3>${ic('compare')}Why</h3><ul class="notes">${li(v.pros, 'check', 'good')}${li(v.cons, 'alert', 'bad')}</ul></section>` : ''}${v.tips.length ? `<section class="card"><h3>${ic('bulb')}Tips for ${esc(b.loc.short)}</h3><ul class="notes">${li(v.tips, 'bulb', '')}</ul></section>` : ''}</div>
     <div class="btn-row"><button class="btn-primary" data-act="cmp-open">${ic('scan')}Open ${esc(b.loc.short)} dashboard</button><button class="btn-secondary" data-act="cmp-track">${ic('pulse')}Track ${esc(b.loc.short)} hazards</button></div>
     <p class="muted foot">This is general guidance from open climate data, not a safety guarantee. Always check official travel advisories, visa rules and current local conditions before you decide.</p>`;
