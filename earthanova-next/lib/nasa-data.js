@@ -89,6 +89,12 @@ export const nasaClimateYear = (lat, lon) => {
   return apiGet(`/climate-year?lat=${lat}&lon=${lon}`, 180000);
 };
 
+/* ML forecast for a date window (server trains a ridge/logistic model on NASA POWER daily data; slow the first time for a new place). */
+export const nasaPredict = (lat, lon, start, end) => {
+  if (isStatic()) return Promise.reject(new Error('this needs the live server'));
+  return apiGet(`/predict?lat=${lat}&lon=${lon}&start=${start}&end=${end}`, 300000);
+};
+
 export const reportUrl = (name, kind) => `${apiBase()}/places/${encodeURIComponent(name)}/report.${kind}`;
 
 /* Same shape as buildAnalysis() in earthanova.js, so every existing panel keeps working.

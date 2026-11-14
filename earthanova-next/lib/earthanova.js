@@ -4,7 +4,8 @@
 import Globe from 'globe.gl';
 import {towerViz, renderChart as renderHzChart, wireCharts as wireHzCharts} from './hazard-charts.js';
 import {buildPlan, bestTimeHtml, riskCalendarHtml, eonetByMonth, wirePlanner} from './compare-planner.js';
-import {eonetEvents, nasaHazards, nasaWindow, nasaClimateYear, nasaFind, nasaEnsure, nasaLoad, nasaBuildAnalysis, isStatic, reportUrl} from './nasa-data.js';
+import {mlHtml, mlErrorHtml} from './compare-ml.js';
+import {eonetEvents, nasaHazards, nasaWindow, nasaClimateYear, nasaPredict, nasaFind, nasaEnsure, nasaLoad, nasaBuildAnalysis, isStatic, reportUrl} from './nasa-data.js';
 
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1589,25 +1590,43 @@ function showCompare(r){
 const PL = {sel:'to', cache:{}, tok:0};
 async function loadPlanner(r){
   const host = $('#cmpPlan'); if(!host) return;
-  const tok = ++PL.tok, place = PL.sel === 'from' ? r.a.loc : r.b.loc;
+  const tok = ++PL.tok, place = PL.sel === 'from' ? r.a.loc : r.b.loc, data = PL.sel === 'from' ? r.a : r.b;
   const sw = `<div class="pl-switch" role="group" aria-label="Place to analyse"><span>Analyse:</span><button type="button" class="chip-opt" data-pl-sel="from" aria-pressed="${PL.sel === 'from'}">${esc(r.a.loc.short)} <small>(from)</small></button><button type="button" class="chip-opt" data-pl-sel="to" aria-pressed="${PL.sel === 'to'}">${esc(r.b.loc.short)} <small>(to)</small></button></div>`;
-  host.innerHTML = `${sw}<div class="card cmp-load"><div class="spinner"></div><p>Loading the year of NASA climate for ${esc(place.short)}. A new place can take a minute…</p></div>`;
+  host.innerHTML = `${sw}<div id="mlHost"><div class="card cmp-load"><div class="spinner"></div><p>Training the forecast model for ${esc(place.short)} on NASA daily data. The first time for a place can take a minute…</p></div></div><div id="plHost"><div class="card cmp-load"><div class="spinner"></div><p>Loading the year of NASA climate for ${esc(place.short)}. A new place can take a minute…</p></div></div>`;
+  const pk = PL.cache[place.id] ??= {};
+  const days = Math.max(1, Math.round((new Date(r.win.end) - new Date(r.win.start)) / 864e5) + 1);
+  const range = PREF[r.pref].slice(0, 2);
+  /* section 1: ML forecast for the dates (independent of the climate sections, so each fills in as soon as it is ready) */
+  (async () => {
+    const mh = $('#mlHost');
+    try{
+      pk.ml ??= nasaPredict(place.lat, place.lon, r.win.start, r.win.end);
+      const ml = await pk.ml;
+      if(tok !== PL.tok) return;
+      const dm = pk.profile && pk.profile.dust_monthly ? pk.profile.dust_monthly[+r.win.start.slice(5, 7) - 1] : null;
+      const tips = {}; mh.innerHTML = mlHtml(ml, place.short, {range, purpose:r.purpose, dust:dm ?? data.dust}, tips); wirePlanner(mh, tips);
+    }catch(e){
+      delete pk.ml;
+      if(tok !== PL.tok) return;
+      const msg = (e && e.message) || 'unavailable', soft = /past|ahead|window/.test(msg);
+      mh.innerHTML = mlErrorHtml(place.short, soft ? msg + '.' : `The forecast model could not be trained for ${place.short} (${msg}). Try again in a moment.`, soft);
+    }
+  })();
+  /* sections 2 and 3: best time to go and seasonal risk calendar */
   try{
-    let pk = PL.cache[place.id];
-    if(!pk){
+    if(!pk.profile){
       const [prof, eo] = await Promise.allSettled([nasaClimateYear(place.lat, place.lon), eonetEvents(place.lat, place.lon, 300, {start:LAST_YEAR - 9, end:LAST_YEAR})]);
       if(prof.status !== 'fulfilled') throw prof.reason;
-      pk = PL.cache[place.id] = {profile:prof.value, eo:eonetByMonth(eo.status === 'fulfilled' ? eo.value : null)};
+      pk.profile = prof.value; pk.eo = eonetByMonth(eo.status === 'fulfilled' ? eo.value : null);
     }
     if(tok !== PL.tok) return;
-    const days = Math.max(1, Math.round((new Date(r.win.end) - new Date(r.win.start)) / 864e5) + 1);
-    const plan = buildPlan(pk.profile, {range:PREF[r.pref].slice(0, 2), purpose:r.purpose, lenWeeks:r.purpose === 'trip' ? Math.max(1, Math.min(13, Math.round(days / 7))) : 4, win:r.win});
-    const tips = {};
-    host.innerHTML = sw + bestTimeHtml(plan, place.short, tips) + riskCalendarHtml(plan, place.short, pk.eo, r.win, tips);
-    wirePlanner(host, tips);
+    const plan = buildPlan(pk.profile, {range, purpose:r.purpose, lenWeeks:r.purpose === 'trip' ? Math.max(1, Math.min(13, Math.round(days / 7))) : 4, win:r.win});
+    const tips = {}, ph = $('#plHost');
+    ph.innerHTML = bestTimeHtml(plan, place.short, tips) + riskCalendarHtml(plan, place.short, pk.eo, r.win, tips);
+    wirePlanner(ph, tips);
   }catch(e){
     if(tok !== PL.tok) return;
-    host.innerHTML = `${sw}<div class="card"><p class="td-exp">The yearly climate for ${esc(place.short)} could not be loaded (${esc((e && e.message) || 'unavailable')}). Try again in a moment.</p></div>`;
+    $('#plHost').innerHTML = `<div class="card"><p class="td-exp">The yearly climate for ${esc(place.short)} could not be loaded (${esc((e && e.message) || 'unavailable')}). Try again in a moment.</p></div>`;
   }
 }
 /* ---------- wiring ---------- */

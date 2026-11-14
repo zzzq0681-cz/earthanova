@@ -1010,3 +1010,16 @@ body:is([data-page="plans"],[data-page="profile"],[data-page="tracking"],[data-p
 .pl-watch li.w-high::marker{color:var(--red)}
 .pl-watch li.w-moderate::marker{color:var(--amber)}
 @media (max-width:900px){.pl-wins{grid-template-columns:1fr}.pl-sec{padding:14px}}
+
+/* ---------- compare: ML forecast section ---------- */
+.ml-sec .pl-h{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.ml-badge{align-self:center;padding:5px 10px;border-radius:999px;border:1px solid rgba(34,211,238,.4);background:rgba(34,211,238,.08);color:var(--cyan);font:600 11.5px var(--f-body)}
+.ml-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.ml-stat{display:grid;gap:3px;padding:12px 14px;border-radius:14px;border:1px solid var(--line-2);background:rgba(6,17,31,.5);min-width:0}
+.ml-stat>span{color:var(--ink-2);font-size:12px}
+.ml-stat b{font:700 22px var(--f-head);font-variant-numeric:tabular-nums}
+.ml-stat small{color:var(--ink-2);font-size:11.5px;line-height:1.4}
+.ml-how{color:var(--ink-2);font-size:12.5px}
+.ml-how summary{cursor:pointer;width:max-content;color:var(--ink)}
+.ml-how .hz-analysis{margin-top:8px;color:var(--ink-2)}
+@media (max-width:900px){.ml-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
