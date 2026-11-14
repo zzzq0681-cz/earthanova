@@ -149,7 +149,7 @@ export function mlHtml(ml, place, opts, tips) {
     <details class="ml-how"><summary>How the model works</summary><ul class="hz-analysis">
       <li>Data: ${esc(String(m.n_days))} days of NASA POWER daily temperature (mean, high, low) and rain for this grid cell, from ${esc(m.train_from)} to ${esc(m.train_to)}.</li>
       <li>Step 1, climate and trend: a regression on the time of year and on the year itself gives the normal temperature for each day and how fast it is warming here (${sg(m.trend_per_decade, 2)} °C per decade at this point).</li>
-      <li>Step 2, recent weather: one ridge regression per lead time (1–3, 4–7, 8–14, 15–30, 31–60, 61–120, 121–240 and 241–400 days) learns how much the anomalies of the last 3, 7, 30, 90 and 365 days still matter for the target day.</li>
+      <li>Step 2, recent weather: one ridge regression per lead time (1–3, 4–7, 8–14, 15–30, 31–60, 61–120, 121–240 and 241–400 days) learns how much the anomalies of the last day and of the last 3, 7, 30, 90 and 365 days still matter for the target day.</li>
       <li>Rain: a logistic regression gives the chance that a day gets 1 mm or more, multiplied by the usual rain on wet days at that time of year.</li>
       <li>The 80% range comes from the model's own errors for that lead time and month. The range for the whole period uses the same dates in past years.</li>
       <li>Limits: this is a statistical model, not a weather forecast. Beyond about two weeks it is mostly climate plus warming trend, and the chart above shows that openly. Grid values (about 50 km) can differ from a station.</li></ul></details>
