@@ -74,6 +74,9 @@ export async function nasaLoad(name) {
   return { series, trends, forecast, backtest };
 }
 
+/* Dust (NASA MERRA-2) and sea level (NASA-SSH). The server fetches them from NASA once per place (about 1-2 min), then serves them from its database. */
+export const nasaHazards = name => apiGet(`/places/${encodeURIComponent(name)}/hazards`, 300000);
+
 export const reportUrl = (name, kind) => `${apiBase()}/places/${encodeURIComponent(name)}/report.${kind}`;
 
 /* Same shape as buildAnalysis() in earthanova.js, so every existing panel keeps working.
@@ -120,10 +123,10 @@ export function nasaBuildAnalysis(loc, radiusKm, bundle, img, period, hit, H) {
 
 
 /* ---------- NASA EONET (Earth Observatory Natural Event Tracker) ----------
- * Open API, no key, CORS enabled. Used for volcanoes, wildfires, floods, severe storms, landslides.
+ * Open API, no key, CORS enabled. Used for volcanoes, floods, severe storms, landslides (wildfires are skipped: EONET does not separate natural from human-caused fires).
  * EONET only lists notable events (GDACS, IRWIN, NOAA NHC, JTWC, Smithsonian...), so "none found" is not proof of safety.
  * It has no earthquake, drought, heat or dust events in its catalogue (checked 2019-2025). */
-const EONET_CATS = ['volcanoes', 'wildfires', 'floods', 'severeStorms', 'landslides'];
+const EONET_CATS = ['volcanoes', 'floods', 'severeStorms', 'landslides'];
 export async function eonetEvents(lat, lon, radiusKm, period) {
   if (isStatic()) return null;
   const dLat = radiusKm / 111, dLon = radiusKm / (111 * Math.max(Math.cos(lat * Math.PI / 180), 0.2));
