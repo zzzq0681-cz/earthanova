@@ -56,6 +56,11 @@ async function apiGet(path, timeout = 20000) {
 
 export const nasaPlaces = () => apiGet('/places');
 export const nasaFind = (lat, lon) => apiGet(`/nearest?lat=${lat}&lon=${lon}`);
+/* Like nasaFind, but if no loaded place is close the server fetches NASA data for this exact point
+ * (POWER + GPM IMERG), computes trends/forecasts and stores it. Can take up to a minute the first time. */
+export const nasaEnsure = (lat, lon, name) =>
+  isStatic() ? nasaFind(lat, lon)
+             : apiGet(`/ensure?lat=${lat}&lon=${lon}&name=${encodeURIComponent(name || '')}`, 240000);
 
 const SERIES_VARS = 't2m,t2m_max,prectotcorr,allsky_sfc_sw_dwn,gwetroot,imerg_mm';
 export async function nasaLoad(name) {

@@ -2,7 +2,7 @@
  * It drives the server-rendered markup in components/EarthanovaMarkup.tsx imperatively,
  * and is loaded once, client-side only, by components/EarthanovaClient.tsx. */
 import Globe from 'globe.gl';
-import {nasaFind, nasaLoad, nasaBuildAnalysis, isStatic, reportUrl} from './nasa-data.js';
+import {nasaFind, nasaEnsure, nasaLoad, nasaBuildAnalysis, isStatic, reportUrl} from './nasa-data.js';
 
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -154,7 +154,7 @@ async function reverseName(lat, lon){
 /* Data policy: climate series come from NASA only (via the Earth Sentinel API). */
 async function analyze(loc, radiusKm, onStep, period){ return analyzeNasa(loc, radiusKm, onStep, period); }
 async function analyzeNasa(loc, radiusKm, onStep, period){
-  const hit = await nasaFind(loc.lat, loc.lon).catch(e => { onStep('era5', false); throw e; });
+  const hit = await nasaEnsure(loc.lat, loc.lon, loc.short || loc.name).catch(e => { onStep('era5', false); throw e; });
   if(!hit.covered){
     onStep('era5', false);
     const e = new Error(`No NASA time series is loaded for this location yet (nearest loaded place: ${hit.place.name}, ${Math.round(hit.distance_km)} km away).`);
@@ -264,7 +264,7 @@ function interpret(A){
     climate: climateFlags.length ? ['Review recommended','warn',`${climateFlags.length} climate signal${climateFlags.length>1?'s':''}`] : ['No climate flags','good',`vs ${per(A).baseLabel} baseline`],
     air: !A.aq ? ['Not loaded yet','na','no NASA layer yet'] : A.aq.pm25 <= 15 ? ['Good air quality','good',`PM2.5 ${A.aq.pm25} µg/m³`] : A.aq.pm25 <= 35 ? ['Moderate air quality','warn',`PM2.5 ${A.aq.pm25} µg/m³`] : ['Poor air quality','warn',`PM2.5 ${A.aq.pm25} µg/m³`]
   };
-  return {dT, dRain, dSoil, drySoil, dHot, flags, climateFlags, hazardFlags, status, hi};
+  return {dT, dRain, dryRain, dSoil, drySoil, dHot, flags, climateFlags, hazardFlags, status, hi};
 }
 
 /* ---------- state ---------- */
@@ -484,7 +484,7 @@ function hazardReadings(A, I){
     score:Math.round(clamp(Math.max(-(dr ?? 0) / 25, -(ds ?? 0) / 25) * 100)),
     headline:dr != null && dr <= -10 ? `Rainfall down ${Math.abs(dr)}%` : 'Rainfall close to normal',
     explain:`Looks for falling rainfall or soil moisture compared with ${per(A).baseLabel}. Rated moderate below −15% and high below −25%.${arid ? ' This is a very dry region, so small changes in millimetres can look large in percent.' : ''}`,
-    metrics:[['Rainfall change', dr == null ? 'n/a' : sgn(dr, 0) + '%'], ['Annual rain', `${A.base.rain ?? '—'} → ${A.cur.rain ?? '—'} mm`], ['Soil moisture', I.drySoil ? 'Very dry' : ds == null ? 'n/a' : sgn(ds, 0) + '%']], items:[]};
+    metrics:[['Rainfall change', dr == null ? (I.dryRain ? 'Hyper-arid' : 'n/a') : sgn(dr, 0) + '%'], ['Annual rain', `${A.base.rain ?? '—'} → ${A.cur.rain ?? '—'} mm`], ['Soil moisture', I.drySoil ? 'Very dry' : ds == null ? 'n/a' : sgn(ds, 0) + '%']], items:[]};
   const low = A.elev != null && A.elev < 10;
   H.flood = dr == null ? {level:'na', score:0, headline:'No rainfall record', explain:'ERA5 rainfall was not available.', metrics:[], items:[]} : {
     level:(dr >= 40 || (dr >= 20 && low)) ? 'high' : (dr >= 20 || (low && dr >= 10)) ? 'moderate' : 'low',
@@ -583,14 +583,14 @@ function renderDashboardCore(){
   // key changes
   const tiles = [
     {m:'temp', label:'Temperature', icon:'thermo', v:I.dT, text:`${sgn(I.dT)} °C`, from:`${A.base.temp?.toFixed(1)} → ${A.cur.temp?.toFixed(1)} °C`, flag:S.I.status[0]==='finding'},
-    {m:'rain', label:'Rainfall', icon:'drop', v:I.dRain, text:I.dRain == null ? 'n/a' : `${sgn(I.dRain,0)}%`, from:`${A.base.rain ?? '—'} → ${A.cur.rain ?? '—'} mm/yr`, flag:S.I.status[1]==='finding'},
+    {m:'rain', label:'Rainfall', icon:'drop', v:I.dRain, text:I.dRain == null ? (I.dryRain ? 'Hyper-arid' : 'n/a') : `${sgn(I.dRain,0)}%`, from:`${A.base.rain ?? '—'} → ${A.cur.rain ?? '—'} mm/yr`, flag:S.I.status[1]==='finding'},
     {m:'hot', label:`Days ≥ ${A.hotBase} °C`, icon:'flame', v:I.dHot, text:I.dHot == null ? 'n/a' : `${sgn(I.dHot,0)}/yr`, from:`${A.base.hot ?? '—'} → ${A.cur.hot ?? '—'} days`, flag:I.dHot != null && I.dHot >= 5},
     {m:'soil', label:'Soil moisture', icon:'soil', v:I.drySoil ? A.cur.soil - A.base.soil : I.dSoil, text:I.drySoil ? 'Very dry' : I.dSoil == null ? 'n/a' : `${sgn(I.dSoil,0)}%`, from:A.base.soil == null ? 'n/a over water' : `${A.base.soil.toFixed(3)} → ${A.cur.soil.toFixed(3)}`, flag:I.dSoil != null && Math.abs(I.dSoil) >= 10}
   ];
   $('#kcGrid').innerHTML = tiles.map(t => { const dir = t.v == null || t.v === 0 ? 'flat' : t.v > 0 ? 'up' : 'down';
     return `<div class="kc-tile${t.flag?' flag':''}" data-metric="${t.m}"><span class="kc-ic">${ic(t.icon)}</span><div style="min-width:0"><p class="kc-k">${t.label}</p><p class="kc-v">${t.text}${ic(dir, `role="img" aria-label="${dir==='up'?'increased':dir==='down'?'decreased':'no change'}"`)}</p><p class="kc-s">${t.from}</p></div></div>`; }).join('');
   const tr = A.trend;
-  $('#verdict').innerHTML = tr ? `<b>Trend ${per(A).label}:</b> ${sgn(tr.slope,2)} °C/yr — ${tr.sig ? 'statistically significant (95%)' : `not statistically significant (only ${tr.n} years)`}. Rainfall ${I.dRain == null ? 'n/a' : I.dRain <= -5 ? 'decreased' : I.dRain >= 5 ? 'increased' : 'roughly stable'} vs baseline.` : '<b>Trend:</b> insufficient data.';
+  $('#verdict').innerHTML = tr ? `<b>Trend ${per(A).label}:</b> ${sgn(tr.slope,2)} °C/yr — ${tr.sig ? 'statistically significant (95%)' : `not statistically significant (only ${tr.n} years)`}. Rainfall ${I.dRain == null ? (I.dryRain ? 'is hyper-arid (a few mm/yr), so no % change' : 'n/a') : I.dRain <= -5 ? 'decreased' : I.dRain >= 5 ? 'increased' : 'roughly stable'} vs baseline.` : '<b>Trend:</b> insufficient data.';
 
   // forecast
   $$('.scen-btn').forEach(b => { const k = b.dataset.s, v = A.proj?.[k]?.[4];
@@ -715,7 +715,7 @@ function renderAdvanced(){
   const A = S.A, I = S.I, H = S.H, tr = A.trend;
   $('#advStats').innerHTML = `<div class="kv kv4">
     <div><span>Temperature change</span><b>${sgn(I.dT)} °C</b></div>
-    <div><span>Rainfall change</span><b>${I.dRain == null ? 'n/a' : sgn(I.dRain,0) + '%'}</b></div>
+    <div><span>Rainfall change</span><b>${I.dRain == null ? (I.dryRain ? 'Hyper-arid' : 'n/a') : sgn(I.dRain,0) + '%'}</b></div>
     <div><span>Linear trend ${per(A).label}</span><b>${tr ? sgn(tr.slope,2) + ' °C/yr' : 'n/a'}</b></div>
     <div><span>Regression t (n=${tr ? tr.n : '—'})</span><b>${tr ? (Math.abs(tr.t) > 999 ? (tr.t > 0 ? '> 999' : '< −999') : tr.t.toFixed(2)) : 'n/a'}</b></div>
     <div><span>Significance (95%)</span><b>${tr ? (tr.sig ? 'Significant' : 'Not significant') : 'n/a'}</b></div>
@@ -1076,7 +1076,7 @@ function reportHTML(rep, autoPrint){
   <p class="noprint"><button onclick="print()">Print / Save as PDF</button></p>
   <h1>${esc(rep.title)}</h1><p class="muted">${esc(loc.name)} · ${fmtLat(loc.lat)}, ${fmtLon(loc.lon)} · ${A.nasa ? 'NASA POWER' : 'ERA5'} grid ${A.grid.lat.toFixed(2)}, ${A.grid.lon.toFixed(2)} · elevation ${A.elev != null ? Math.round(A.elev) + ' m' : 'n/a'}<br>Prepared by ${author} on ${new Date(rep.createdAt).toLocaleDateString()} · data fetched ${d} UTC</p>
   ${rep.notes ? `<h2>Notes</h2><p class="notes">${esc(rep.notes)}</p>` : ''}
-  ${has('summary') ? `<h2>Summary</h2><div class="grid"><div class="box">Temperature change<b>${sgn(I.dT)} °C</b><span class="muted">${per(A).baseLabel} → ${per(A).curLabel}</span></div><div class="box">Rainfall change<b>${I.dRain == null ? 'n/a' : sgn(I.dRain,0) + '%'}</b><span class="muted">${A.base.rain ?? '—'} → ${A.cur.rain ?? '—'} mm/yr</span></div><div class="box">Trend<b>${A.trend ? sgn(A.trend.slope,2) + ' °C/yr' : 'n/a'}</b><span class="muted">${A.trend ? (A.trend.sig ? 'significant (95%)' : 'not significant') : ''}</span></div></div>
+  ${has('summary') ? `<h2>Summary</h2><div class="grid"><div class="box">Temperature change<b>${sgn(I.dT)} °C</b><span class="muted">${per(A).baseLabel} → ${per(A).curLabel}</span></div><div class="box">Rainfall change<b>${I.dRain == null ? (I.dryRain ? 'Hyper-arid' : 'n/a') : sgn(I.dRain,0) + '%'}</b><span class="muted">${A.base.rain ?? '—'} → ${A.cur.rain ?? '—'} mm/yr</span></div><div class="box">Trend<b>${A.trend ? sgn(A.trend.slope,2) + ' °C/yr' : 'n/a'}</b><span class="muted">${A.trend ? (A.trend.sig ? 'significant (95%)' : 'not significant') : ''}</span></div></div>
     <h2>Indicators</h2><ul><li>Solar: ${esc(I.hi.solar[0])} (${esc(I.hi.solar[2])})</li><li>Climate: ${esc(I.hi.climate[0])} (${esc(I.hi.climate[2])})</li><li>Air quality: ${esc(I.hi.air[0])} (${esc(I.hi.air[2])})</li></ul>
     <h2>Screening flags</h2>${I.flags.length ? `<ul>${I.flags.map(f => `<li>${esc(f.t)}</li>`).join('')}</ul>` : '<p>No thresholds exceeded.</p>'}` : ''}
   ${has('towers') ? `<h2>Risk tower results</h2><table><thead><tr><th>Tower</th><th>Level</th><th style="text-align:left">Finding</th></tr></thead><tbody>${tw}</tbody></table>` : ''}
