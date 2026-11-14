@@ -12,12 +12,16 @@ const sg = (v, d = 1) => { if (!num(v)) return '—'; const r = Number(Math.abs(
 const dShort = iso => new Date(iso + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 const dLong = iso => new Date(iso + 'T12:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 const keyHtml = k => `<span><i class="hz-key hz-key-${k.kind}" style="--c:${k.color}"></i>${esc(k.name)}</span>`;
-const W = 900, L = 42, R = 14;
+// Charts are drawn narrower on phones so their labels stay readable when the SVG is scaled to the screen.
+const phone = () => typeof window !== 'undefined' && window.innerWidth <= 640;
+let W = 900;
+const L = 42, R = 14;
 
 function niceStep(span) { return span > 28 ? 10 : span > 14 ? 5 : span > 7 ? 2 : 1; }
 
 /* ---------- chart 1: daily swing, model vs typical year ---------- */
 function swingChart(days, tips) {
+  W = phone() ? 480 : 900;
   const n = days.length, slot = (W - L - R) / n, X = i => L + (i + .5) * slot;
   const H = 240, T = 22, B = 30, ih = H - T - B;
   const vals = days.flatMap(d => [d.sl, d.sh, d.typ]);
@@ -36,7 +40,7 @@ function swingChart(days, tips) {
   g += `<path d="M${days.map((d, i) => `${X(i).toFixed(1)} ${Y(d.typ).toFixed(1)}`).join(' L')}" fill="none" stroke="${C.ink2}" stroke-width="2" stroke-dasharray="5 4" stroke-linecap="round" stroke-linejoin="round"/>`;
   g += `<path d="M${days.map((d, i) => `${X(i).toFixed(1)} ${Y(d.s).toFixed(1)}`).join(' L')}" fill="none" stroke="${C.cyan}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
   [inI[0], inI[inI.length - 1]].filter((v, k, a) => v != null && a.indexOf(v) === k).forEach(i => { g += `<circle cx="${X(i).toFixed(1)}" cy="${Y(days[i].s).toFixed(1)}" r="4.5" fill="${C.cyan}" stroke="${C.surface}" stroke-width="2"/>`; });
-  const every = Math.max(1, Math.ceil(n / 9));
+  const every = Math.max(1, Math.ceil(n / (W < 600 ? 6 : 9)));
   days.forEach((d, i) => { if (i % every === 0) g += `<text class="hz-ax" x="${X(i).toFixed(1)}" y="${H - 8}" text-anchor="middle">${esc(dShort(d.d))}</text>`; });
   g += `<line class="hz-xh" y1="${T}" y2="${T + ih}"/>`;
   days.forEach((d, i) => { g += `<rect class="hz-hit" data-pt="mlswing" data-i="${i}" tabindex="0" x="${(X(i) - slot / 2).toFixed(1)}" y="${T}" width="${slot.toFixed(1)}" height="${ih}" fill="transparent"/>`; });
@@ -50,6 +54,7 @@ function swingChart(days, tips) {
 /* ---------- chart 3: how good the model is at each lead time (from the backtest) ---------- */
 const bucketLabel = b => b[0] === b[1] ? `${b[0]} d` : `${b[0]}–${b[1]} d`;
 function skillChart(bt, mineBucket, tips) {
+  W = phone() ? 480 : 900;
   const rows = bt.buckets, n = rows.length, slot = (W - L - R) / n, X = i => L + (i + .5) * slot, bw = Math.min(22, slot * 0.3);
   const H = 230, T = 26, B = 40, ih = H - T - B;
   const all = rows.flatMap(r => [r.dtr.skill_typical, r.dtr.skill_trend]);
@@ -67,9 +72,9 @@ function skillChart(bt, mineBucket, tips) {
       g += `<path class="hz-bar" data-i="${i}" d="${d}" fill="${col}"/>`;
     });
     g += `<text class="hz-val" x="${(X(i) - bw / 2 - 1).toFixed(1)}" y="${(Y(Math.max(r.dtr.skill_typical, 0)) - 6).toFixed(1)}" text-anchor="middle">${f(r.dtr.skill_typical, 0)}%</text>`;
-    g += `<text class="hz-ax" x="${X(i).toFixed(1)}" y="${H - 20}" text-anchor="middle">${esc(bucketLabel(r.lead))}</text>`;
+    g += `<text class="hz-ax pl-bk" x="${X(i).toFixed(1)}" y="${H - 20}" text-anchor="middle">${esc(W < 600 ? bucketLabel(r.lead).replace(/\s*d$/, '') : bucketLabel(r.lead))}</text>`;
   });
-  g += `<text class="hz-ax" x="${(W / 2).toFixed(1)}" y="${H - 4}" text-anchor="middle">Days between the last NASA observation and the day being predicted</text>`;
+  g += `<text class="hz-ax" x="${(W / 2).toFixed(1)}" y="${H - 4}" text-anchor="middle">${W < 600 ? 'Days after the last NASA observation' : 'Days between the last NASA observation and the day being predicted'}</text>`;
   g += `<line class="hz-xh" y1="${T}" y2="${T + ih}"/>`;
   rows.forEach((r, i) => { g += `<rect class="hz-hit" data-pt="mlskill" data-i="${i}" tabindex="0" x="${(X(i) - slot / 2).toFixed(1)}" y="${T}" width="${slot.toFixed(1)}" height="${ih}" fill="transparent"/>`; });
   tips.mlskill = rows.map(r => ({ head: `${bucketLabel(r.lead)} ahead · ${r.n} test cases`, rows: [

@@ -1047,3 +1047,18 @@ body.adv-locked[data-view="advanced"] .cards>.card[data-views~="advanced"]:not([
 .trial-box.on>svg.ic{color:var(--mint)}
 .plan-cta{display:grid;gap:8px}
 .rep-err{margin:0 0 12px;padding:10px 14px;border-radius:10px;border:1px solid rgba(255,190,85,.5);background:rgba(255,190,85,.1);color:var(--amber);font-size:13px}
+
+/* responsive tables: wrapper added by wrapTables() in lib/earthanova.js */
+.tbl-x{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+.tbl-x>table{min-width:100%}
+@media (max-width:700px){
+  .tbl th,.tbl td{padding:6px 7px}
+  .tbl{font-size:12.5px}
+  .tbl-x,.tbl-scroll{scrollbar-width:thin}
+}
+/* grids with one auto column grow to the widest nowrap table inside; pin them to the screen width */
+.pl-root{grid-template-columns:minmax(0,1fr)}
+.pl-root>*,.pl-sec,.ml-sec{min-width:0}
+@media (max-width:640px){.pl-svg .hz-ax,.pl-svg .hz-ref-t,.pl-svg .hz-val{font-size:13px}.pl-svg .hz-ax.pl-bk{font-size:10.5px}}
+/* the seasonal risk calendar section is a one-column grid too */
+.pl-sec,.ml-sec{grid-template-columns:minmax(0,1fr)}

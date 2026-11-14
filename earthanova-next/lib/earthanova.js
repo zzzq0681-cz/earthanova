@@ -1773,3 +1773,19 @@ function finishSplash(){ setPage('home'); setState('idle'); updateGlobe(); }
   (function f(){ const p = Math.min(1, (performance.now() - t0) / dur); fill.style.width = (p * 100) + '%'; note.textContent = msgs[Math.min(msgs.length - 1, Math.floor(p * msgs.length))];
     if(p < 1) requestAnimationFrame(f); else finishSplash(); })();
 })();
+
+/* ---------- responsive tables ----------
+ * Wide data tables (trends, hazard catalogue, yearly record, Compare tables) are rendered as HTML
+ * strings all over the app. On a phone they are wider than the card, so every table gets a
+ * horizontally scrolling wrapper instead of being clipped at the card edge. */
+function wrapTables(){
+  document.querySelectorAll('table:not(.sr-only)').forEach(t => {
+    if(t.closest('.tbl-scroll, .tbl-x')) return;
+    const w = document.createElement('div'); w.className = 'tbl-x';
+    t.parentNode.insertBefore(w, t); w.appendChild(t);
+  });
+}
+let wrapQueued = false;
+new MutationObserver(() => { if(wrapQueued) return; wrapQueued = true; requestAnimationFrame(() => { wrapQueued = false; wrapTables(); }); })
+  .observe(document.body, {childList: true, subtree: true});
+wrapTables();

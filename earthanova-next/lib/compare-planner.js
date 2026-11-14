@@ -78,12 +78,15 @@ export function eonetByMonth(eo) {
 }
 
 /* ---------- shared bits ---------- */
-const W = 900, L = 40, R = 14;
+const phone = () => typeof window !== 'undefined' && window.innerWidth <= 640;
+let W = 900;   // narrower on phones (set in bestTimeHtml) so labels stay readable
+const L = 40, R = 14;
 const keyHtml = (k) => `<span><i class="hz-key hz-key-${k.kind}" style="--c:${k.color}"></i>${esc(k.name)}</span>`;
 const monthStarts = () => { const out = []; for (let m = 0; m < 12; m++) out.push([Math.min(51, Math.floor(CUM[m] / 7)), MON[m]]); return out; };
 
 /* ---------- section 1: best time to go ---------- */
 export function bestTimeHtml(plan, place, tips) {
+  W = phone() ? 480 : 900;
   const n = 52, slot = (W - L - R) / n, X = w => L + (w + .5) * slot;
   const bw = Math.min(14, slot * 0.7);
   /* comfort ribbon */
