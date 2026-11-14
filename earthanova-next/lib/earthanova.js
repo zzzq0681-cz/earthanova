@@ -557,7 +557,7 @@ function renderRisk(){
   const has = !!S.A;
   $('#riskWrap').hidden = !has; $('#riskEmpty').hidden = has;
   if(!has) return;
-  $('#riskSub').textContent = `${S.loc.name} · scanned ${ago(S.A.fetchedAt)} · ${S.A.radiusKm} km radius`;
+  $('#riskSub').textContent = `${S.loc.name} · scanned ${ago(S.A.fetchedAt)} · ${S.A.radiusKm} km radius. Hazard layers use other open sources (USGS, Open-Meteo, CAMS), not the NASA POWER climate record.`;
   refreshMosaics();
   const tok = ++S.riskTok, final = levelsOf(S.H), cur = HAZARDS.map(() => 'scanning');
   renderRiskStage(cur); renderTowerList(cur); renderTowerDetail();
