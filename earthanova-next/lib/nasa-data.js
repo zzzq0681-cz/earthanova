@@ -57,7 +57,7 @@ async function apiGet(path, timeout = 20000) {
 export const nasaPlaces = () => apiGet('/places');
 export const nasaFind = (lat, lon) => apiGet(`/nearest?lat=${lat}&lon=${lon}`);
 
-const SERIES_VARS = 't2m,t2m_max,prectotcorr,allsky_sfc_sw_dwn,gwetroot';
+const SERIES_VARS = 't2m,t2m_max,prectotcorr,allsky_sfc_sw_dwn,gwetroot,imerg_mm';
 export async function nasaLoad(name) {
   const n = encodeURIComponent(name);
   const [series, trends, forecast, backtest] = await Promise.all([
@@ -79,19 +79,22 @@ export function nasaBuildAnalysis(loc, radiusKm, bundle, img, period, hit, H) {
   const s = bundle.series, by = {};
   s.month.forEach((m, i) => {
     const y = +m.slice(0, 4), mo = +m.slice(5, 7), days = new Date(y, mo, 0).getDate();
-    const o = (by[y] ??= { t: [], p: [], sw: [], sm: [] });
+    const o = (by[y] ??= { t: [], p: [], im: [], sw: [], sm: [] });
     o.t.push(s.t2m[i]);
-    o.p.push(s.prectotcorr[i] == null ? null : s.prectotcorr[i] * days);   // mm/day -> mm/month
+    o.p.push(s.prectotcorr[i] == null ? null : s.prectotcorr[i] * days);   // POWER fallback, mm/day -> mm/month
+    o.im.push(s.imerg_mm ? s.imerg_mm[i] : null);                          // NASA GPM IMERG V07, mm/month
     o.sw.push(s.allsky_sfc_sw_dwn[i]);
     o.sm.push(s.gwetroot[i]);
   });
   const full = a => a.length === 12 && a.every(v => v != null);
   const years = period.years.map(y => {
-    const o = by[y] || { t: [], p: [], sw: [], sm: [] };
+    const o = by[y] || { t: [], p: [], im: [], sw: [], sm: [] };
+    const hasIm = !!(s.imerg_mm && s.imerg_mm.some(v => v != null));
     const sw = mean(o.sw);
     return {
       year: y, temp: full(o.t) ? round(mean(o.t), 2) : null,
-      rain: full(o.p) ? round(o.p.reduce((a, v) => a + v, 0), 0) : null,
+      rain: hasIm ? (full(o.im) ? round(o.im.reduce((a, v) => a + v, 0), 0) : null)
+                  : (full(o.p) ? round(o.p.reduce((a, v) => a + v, 0), 0) : null),   // IMERG when available
       hot: null, solar: sw == null ? null : round(sw / 3.6, 2),        // MJ/m2/day -> kWh/m2/day
       soil: round(mean(o.sm), 3)                                        // root-zone wetness index 0-1
     };

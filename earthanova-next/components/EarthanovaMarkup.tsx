@@ -465,7 +465,7 @@ export default function EarthanovaMarkup() {
                 </article>
                 <article className="card" data-views="advanced" aria-labelledby="advYearsH">
                   <header className="card-h">
-                    <h2 id="advYearsH"><i data-ic="bars" />Yearly record <small>NASA POWER · calendar years</small></h2>
+                    <h2 id="advYearsH"><i data-ic="bars" />Yearly record <small>NASA POWER (temperature, soil, solar) · NASA GPM IMERG (rain) · calendar years</small></h2>
                   </header>
                   <div className="tbl-scroll" id="advYears" />
                 </article>
