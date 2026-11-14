@@ -241,12 +241,13 @@ const sgn = (v, d=1) => v == null ? '—' : (v > 0 ? '+' : v < 0 ? '−' : '±')
 const pct = (a, b) => (a == null || b == null || a === 0) ? null : Math.round((b - a) / Math.abs(a) * 100);
 function interpret(A){
   const dT = A.cur.temp != null && A.base.temp != null ? round(A.cur.temp - A.base.temp, 1) : null;
+  const shortRain = !!A.rainN && (A.rainN.cur < 2 || A.rainN.base < 3);   // too few complete rain years to compare windows
   const dryRain = A.base.rain != null && A.base.rain < 20, dRain = dryRain ? null : pct(A.base.rain, A.cur.rain), drySoil = A.base.soil != null && A.base.soil < 0.05, dSoil = drySoil ? null : pct(A.base.soil, A.cur.soil);
   const dHot = A.cur.hot != null && A.base.hot != null ? round(A.cur.hot - A.base.hot, 1) : null;
   const flags = [];
   if(dT != null && dT >= 0.5) flags.push({k:'climate', t:`Warming ${sgn(dT)} °C`});
-  if(dRain != null && dRain <= -15) flags.push({k:'water', t:`Rainfall ${sgn(dRain,0)}% vs baseline (short windows, check the long-term trend)`});
-  if(dRain != null && dRain >= 20) flags.push({k:'water', t:`Rainfall ${sgn(dRain,0)}% (flood review)`});
+  if(dRain != null && !shortRain && dRain <= -15) flags.push({k:'water', t:`Rainfall ${sgn(dRain,0)}% vs baseline (short windows, check the long-term trend)`});
+  if(dRain != null && !shortRain && dRain >= 20) flags.push({k:'water', t:`Rainfall ${sgn(dRain,0)}% (flood review)`});
   if(dHot != null && dHot >= 5) flags.push({k:'land', t:`Hot days ${sgn(dHot,0)}/yr`});
   if(A.elev != null && A.elev > 0 && A.elev < 10) flags.push({k:'hazard', t:`Low-lying (${Math.round(A.elev)} m)`});
   if(A.quakes && (A.quakes.maxMag >= 5.5 || A.quakes.count >= 10)) flags.push({k:'hazard', t:`Seismic: ${A.quakes.count} M4+ in ${per(A).label} (max M${A.quakes.maxMag.toFixed(1)})`});
@@ -254,7 +255,7 @@ function interpret(A){
   const climateFlags = flags.filter(f => f.k !== 'hazard'), hazardFlags = flags.filter(f => f.k === 'hazard');
   const status = [
     (dT != null && Math.abs(dT) >= 0.5) || A.trend?.sig ? 'finding' : 'monitoring',
-    dRain != null && Math.abs(dRain) >= 10 ? 'finding' : 'monitoring',
+    dRain != null && !shortRain && Math.abs(dRain) >= 10 ? 'finding' : 'monitoring',
     (dSoil != null && Math.abs(dSoil) >= 10) || (dHot != null && Math.abs(dHot) >= 5) ? 'finding' : 'monitoring',
     hazardFlags.length ? 'review' : 'monitoring'
   ];
@@ -264,7 +265,7 @@ function interpret(A){
     climate: climateFlags.length ? ['Review recommended','warn',`${climateFlags.length} climate signal${climateFlags.length>1?'s':''}`] : ['No climate flags','good',`vs ${per(A).baseLabel} baseline`],
     air: !A.aq ? ['Not loaded yet','na','no NASA layer yet'] : A.aq.pm25 <= 15 ? ['Good air quality','good',`PM2.5 ${A.aq.pm25} µg/m³`] : A.aq.pm25 <= 35 ? ['Moderate air quality','warn',`PM2.5 ${A.aq.pm25} µg/m³`] : ['Poor air quality','warn',`PM2.5 ${A.aq.pm25} µg/m³`]
   };
-  return {dT, dRain, dryRain, dSoil, drySoil, dHot, flags, climateFlags, hazardFlags, status, hi};
+  return {dT, dRain, dryRain, shortRain, dSoil, drySoil, dHot, flags, climateFlags, hazardFlags, status, hi};
 }
 
 /* ---------- state ---------- */
@@ -583,14 +584,14 @@ function renderDashboardCore(){
   // key changes
   const tiles = [
     {m:'temp', label:'Temperature', icon:'thermo', v:I.dT, text:`${sgn(I.dT)} °C`, from:`${A.base.temp?.toFixed(1)} → ${A.cur.temp?.toFixed(1)} °C`, flag:S.I.status[0]==='finding'},
-    {m:'rain', label:'Rainfall', icon:'drop', v:I.dRain, text:I.dRain == null ? (I.dryRain ? 'Hyper-arid' : 'n/a') : `${sgn(I.dRain,0)}%`, from:`${A.base.rain ?? '—'} → ${A.cur.rain ?? '—'} mm/yr`, flag:S.I.status[1]==='finding'},
+    {m:'rain', label:'Rainfall', icon:'drop', v:I.dRain, text:I.dRain == null ? (I.dryRain ? 'Hyper-arid' : 'n/a') : `${sgn(I.dRain,0)}%${I.shortRain ? '*' : ''}`, from:`${A.base.rain ?? '—'} → ${A.cur.rain ?? '—'} mm/yr${I.shortRain ? ` · *short window: ${A.rainN.cur} yr vs ${A.rainN.base} yr` : ''}`, flag:S.I.status[1]==='finding'},
     {m:'hot', label:`Days ≥ ${A.hotBase} °C`, icon:'flame', v:I.dHot, text:I.dHot == null ? 'n/a' : `${sgn(I.dHot,0)}/yr`, from:`${A.base.hot ?? '—'} → ${A.cur.hot ?? '—'} days`, flag:I.dHot != null && I.dHot >= 5},
     {m:'soil', label:'Soil moisture', icon:'soil', v:I.drySoil ? A.cur.soil - A.base.soil : I.dSoil, text:I.drySoil ? 'Very dry' : I.dSoil == null ? 'n/a' : `${sgn(I.dSoil,0)}%`, from:A.base.soil == null ? 'n/a over water' : `${A.base.soil.toFixed(3)} → ${A.cur.soil.toFixed(3)}`, flag:I.dSoil != null && Math.abs(I.dSoil) >= 10}
   ];
   $('#kcGrid').innerHTML = tiles.map(t => { const dir = t.v == null || t.v === 0 ? 'flat' : t.v > 0 ? 'up' : 'down';
     return `<div class="kc-tile${t.flag?' flag':''}" data-metric="${t.m}"><span class="kc-ic">${ic(t.icon)}</span><div style="min-width:0"><p class="kc-k">${t.label}</p><p class="kc-v">${t.text}${ic(dir, `role="img" aria-label="${dir==='up'?'increased':dir==='down'?'decreased':'no change'}"`)}</p><p class="kc-s">${t.from}</p></div></div>`; }).join('');
   const tr = A.trend;
-  $('#verdict').innerHTML = tr ? `<b>Trend ${per(A).label}:</b> ${sgn(tr.slope,2)} °C/yr — ${tr.sig ? 'statistically significant (95%)' : `not statistically significant (only ${tr.n} years)`}. Rainfall ${I.dRain == null ? (I.dryRain ? 'is hyper-arid (a few mm/yr), so no % change' : 'n/a') : I.dRain <= -5 ? 'decreased' : I.dRain >= 5 ? 'increased' : 'roughly stable'} vs baseline.` : '<b>Trend:</b> insufficient data.';
+  $('#verdict').innerHTML = tr ? `<b>Trend ${per(A).label}:</b> ${sgn(tr.slope,2)} °C/yr — ${tr.sig ? 'statistically significant (95%)' : `not statistically significant (only ${tr.n} years)`}. Rainfall ${I.dRain == null ? (I.dryRain ? 'is hyper-arid (a few mm/yr), so no % change' : 'n/a') : I.dRain <= -5 ? 'decreased' : I.dRain >= 5 ? 'increased' : 'roughly stable'} vs baseline${I.shortRain ? ' (short rain window, not a trend)' : ''}.` : '<b>Trend:</b> insufficient data.';
 
   // forecast
   $$('.scen-btn').forEach(b => { const k = b.dataset.s, v = A.proj?.[k]?.[4];

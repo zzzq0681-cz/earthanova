@@ -108,10 +108,12 @@ export function nasaBuildAnalysis(loc, radiusKm, bundle, img, period, hit, H) {
   const B = period.baseYears, C = period.curYears;
   const base = { temp: avg('temp', B), rain: avg('rain', B), hot: null, solar: avg('solar', B), soil: avg('soil', B) };
   const cur = { temp: avg('temp', C), rain: avg('rain', C), hot: null, solar: avg('solar', C), soil: avg('soil', C) };
+  const nR = ys => years.filter(r => ys.includes(r.year) && r.rain != null).length;   // complete rain years per window
+  const rainN = { base: nR(B), cur: nR(C) };
   const trend = linreg(period.years, years.map(r => r.temp));
   return {
     v: 4, period, loc, radiusKm, fetchedAt: Date.now(), grid: { lat: hit.place.lat, lon: hit.place.lon }, hotBase: 35,
-    years, base, cur, trend, proj: null, elev: null, quakes: null, aq: null, img: img || null,
+    years, base, cur, rainN, trend, proj: null, elev: null, quakes: null, aq: null, img: img || null,
     nasa: { place: hit.place, distance_km: hit.distance_km, bundle, source: 'NASA POWER (MERRA-2 / CERES)' }
   };
 }
