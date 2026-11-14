@@ -106,6 +106,7 @@ export default function EarthanovaMarkup() {
                 <div className="up-plan">
                   <span className="tag mint" id="upPlan">Basic plan</span>
                 </div>
+                <div className="up-trial" id="upTrial" />
                 <div className="up-links">
                   <button className="btn-ghost" data-nav="profile" role="menuitem"><i data-ic="user" />My profile</button>
                   <button className="btn-ghost" data-nav="plans" role="menuitem"><i data-ic="star" />Plans &amp; subscription</button>
@@ -285,6 +286,7 @@ export default function EarthanovaMarkup() {
                 </div>
               </div>
               <div className="cards" id="cards">
+                <div className="adv-lock" id="advLock" />
                 {/* BASIC */}
                 <article className="card summary" data-views="basic" aria-labelledby="sumH">
                   <header className="card-h">

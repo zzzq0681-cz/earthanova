@@ -338,13 +338,15 @@ function setUser(u){
   if(u){
     const initials = u.name.trim().split(/\s+/).map(w => w[0]).slice(0,2).join('').toUpperCase() || 'EA';
     $('#userBtn').textContent = initials; $('#upName').textContent = u.name; $('#upEmail').textContent = u.email; $('#upRole').textContent = roleOf(u.role).label;
-    setView(store.get(uKey('view'), null) || roleOf(u.role).view, false); renderPlanChip();
+    let v0 = store.get(uKey('view'), null) || roleOf(u.role).view; if(v0 === 'advanced' && !hasAdvanced()) v0 = 'basic';
+    setView(v0, false); renderPlanChip();
   }
 }
 function setView(v, persist = true){
   S.view = v; document.body.dataset.view = v;
   $$('[data-setview]').forEach(b => b.setAttribute('aria-pressed', b.dataset.setview === v));
   if(persist && S.user) store.set(uKey('view'), v);
+  applyLocks();
   if(S.A) requestAnimationFrame(() => { renderChart(); refreshMosaics(); });
 }
 function closeUserPop(){ $('#userPop').hidden = true; $('#userBtn').setAttribute('aria-expanded','false'); }
@@ -406,7 +408,7 @@ function wireAuth(){
     try{
       const u = await registerUser({...AU.d, role:AU.role, field:$('#rgField').value, interests:[...AU.interests], purpose:$('#rgPurpose').value});
       setUser(u); AU.d = {};
-      afterAuth(`Account created. Your dashboard starts in ${roleOf(u.role).view} view.`);
+      afterAuth('Account created on the Basic plan.'); setTimeout(() => offerTrial(u), 350);
     }catch(ex){ err.textContent = ex.message; AU.step = 1; showAuthPane(); $('#rg1Err').textContent = ex.message; }
   });
   document.addEventListener('keydown', e => { if(e.key === 'Escape' && !$('#auth').hidden) closeAuth(true); });
@@ -1215,22 +1217,72 @@ $('#dlg').addEventListener('mousedown', e => { if(e.target.id === 'dlg') closeDi
 const PRICE_PRO = '$12';
 const PLANS = {
   basic:{id:'basic', name:'Basic', price:'Free', per:'', blurb:'For curious people, students and first projects.', limits:{projects:3, reports:3, tracked:1},
-    feats:['Scan any place for any study period', 'Basic, Advanced and Playful dashboards', 'Risk Monitoring towers', 'Compare places before you travel', 'Up to 3 projects and 3 saved reports', 'Track 1 region with Hazard Tracking']},
+    feats:['Scan any place for any study period', 'Basic and Playful dashboards', 'Advanced analysis: free for 30 days with a trial', 'Risk Monitoring towers', 'Compare places before you travel', 'Up to 3 projects and 3 saved reports', 'Track 1 region with Hazard Tracking']},
   pro:{id:'pro', name:'Pro', price:PRICE_PRO, per:'/ month', blurb:'For researchers, developers and working professionals.', limits:{projects:50, reports:50, tracked:10},
-    feats:['Everything in Basic', 'Up to 50 projects', 'Up to 50 saved reports', 'Track up to 10 regions with Hazard Tracking']},
+    feats:['Everything in Basic', 'Advanced analysis dashboard (full statistics, model ensemble, exports)', 'Up to 50 projects', 'Up to 50 saved reports', 'Track up to 10 regions with Hazard Tracking']},
   org:{id:'org', name:'Organization', price:'Custom', per:'', contact:true, blurb:'For teams, institutes and companies.', limits:{projects:Infinity, reports:Infinity, tracked:Infinity},
     feats:['Everything in Pro', 'Unlimited projects, reports and tracked regions', 'Onboarding for your team', 'Plan set up and managed by our team: contact sales']}
 };
 const LIMIT_LABEL = {projects:'projects', reports:'saved reports', tracked:'tracked regions'};
 const lim = v => v === Infinity ? 'Unlimited' : v;
 const subOf = () => store.get(uKey('sub'), null) || {plan:'basic', status:'active', since:S.user?.created || Date.now(), renews:null, history:[{at:Date.now(), plan:'basic', note:'Account created on the Basic plan'}]};
-const planOf = () => PLANS[subOf().plan] || PLANS.basic;
+/* free trial: every account can start one 30-day trial of Pro (demo only, nothing is charged). It unlocks Advanced analysis and Pro limits. */
+const TRIAL_DAYS = 30;
+const trialOf = () => { const t = subOf().trial; return t && t.endsAt > Date.now() ? t : null; };
+const trialUsed = () => !!subOf().trial;
+const trialDaysLeft = t => Math.max(1, Math.ceil((t.endsAt - Date.now()) / 864e5));
+const effPlan = () => { const id = subOf().plan; return id === 'basic' && trialOf() ? 'pro' : id; };
+const planOf = () => PLANS[effPlan()] || PLANS.basic;
+const hasAdvanced = () => !!S.user && effPlan() !== 'basic';
+function startTrial(){
+  if(!S.user){ openAuth('register', 'Create a free account to start your free trial.'); return; }
+  if(trialUsed()){ toast(trialOf() ? 'Your free trial is already running.' : 'Your free trial has already been used.'); return; }
+  const s = subOf(), now = Date.now();
+  s.trial = {startedAt:now, endsAt:now + TRIAL_DAYS*864e5};
+  s.history = [{at:now, plan:'trial', note:`Free trial started (${TRIAL_DAYS} days, ends ${dt(s.trial.endsAt)})`}, ...(s.history || [])].slice(0, 20);
+  store.set(uKey('sub'), s); renderPlanChip(); rerenderAccountPages();
+  toast(`Your ${TRIAL_DAYS}-day free trial has started. Advanced analysis is unlocked.`);
+  if(S.A) requestAnimationFrame(() => { renderChart(); refreshMosaics(); });
+}
+function trialDialog(){
+  const used = trialUsed();
+  showDialog({title:'Advanced analysis is locked', body:`<p>The Advanced view (full statistics, model ensemble, hazard catalogue and exports) is part of Pro. ${used ? 'Your free trial has ended, so upgrade to Pro to unlock it.' : 'Start your free trial for a month to unlock it, with Pro limits too. No card is needed in this demo.'}</p>`,
+    actions: used ? [{label:'Not now'}, {label:'Upgrade to Pro', cls:'btn-primary', fn:() => { setTimeout(proDialog, 0); }}] : [{label:'Not now'}, {label:'Start your free trial for a month', cls:'btn-primary', fn:() => { startTrial(); }}]});
+}
+function offerTrial(u){
+  showDialog({title:`Welcome, ${u.name.trim().split(/\s+/)[0]}`, body:`<p>Your account starts on the <b>Basic</b> plan (free).</p><p>As a new member you can start a <b>${TRIAL_DAYS}-day free trial</b>. It unlocks the Advanced analysis and the Pro limits. Start it now, or later from the Advanced button or your account menu.</p><p class="muted">Demo only: no card is asked for and nothing is charged.</p>`,
+    actions:[{label:'Maybe later'}, {label:'Start free trial', cls:'btn-primary', fn:() => { startTrial(); }}]});
+}
+/* lock the Advanced view on accounts without Pro or an active trial */
+function applyLocks(){
+  const locked = !hasAdvanced();
+  document.body.classList.toggle('adv-locked', locked);
+  $$('[data-setview="advanced"]').forEach(b => {
+    b.classList.toggle('is-locked', locked);
+    if(b.dataset.t0 == null) b.dataset.t0 = b.getAttribute('title') || '';
+    if(locked) b.setAttribute('title', 'Locked: start your free trial for a month'); else if(b.dataset.t0) b.setAttribute('title', b.dataset.t0); else b.removeAttribute('title');
+  });
+  $$('.cards>.card[data-views]').forEach(c => c.toggleAttribute('inert', locked && /advanced/.test(c.dataset.views) && !/basic/.test(c.dataset.views)));
+  const el = $('#advLock'); if(!el) return;
+  if(!locked){ el.innerHTML = ''; return; }
+  const used = trialUsed();
+  el.innerHTML = `<span class="adv-lock-ic">${ic('lock')}</span><div class="adv-lock-t"><h2>Advanced analysis is locked</h2><p>Full statistics, the yearly record, the CMIP6 model ensemble, the hazard catalogue and data export are part of Pro. ${used ? 'Your free trial has ended.' : 'Try everything free for a month. No card is needed in this demo.'}</p></div><div class="adv-lock-a">${used ? `<button class="btn-primary" data-act="plan-pro">${ic('star')}Upgrade to Pro</button>` : `<button class="btn-primary" data-act="trial-start">${ic('star')}Start your free trial for a month</button>`}<button class="btn-secondary" data-nav="plans">See plans</button></div>`;
+}
 const orgReq = () => store.get(uKey('orgreq'), null);
 function setPlan(plan, note){
   const s = subOf(); s.plan = plan; s.status = 'active'; s.since = Date.now(); s.renews = plan === 'pro' ? Date.now() + 30*864e5 : null;
   s.history = [{at:Date.now(), plan, note}, ...(s.history || [])].slice(0, 20); store.set(uKey('sub'), s); renderPlanChip();
 }
-function renderPlanChip(){ if(S.user) $('#upPlan').textContent = `${planOf().name} plan`; }
+function renderPlanChip(){
+  if(!S.user) return;
+  const t = trialOf();
+  $('#upPlan').textContent = t ? `Pro trial · ${trialDaysLeft(t)} d left` : `${planOf().name} plan`;
+  const up = $('#upTrial');
+  if(up) up.innerHTML = t ? `<p class="up-trial-note on">${ic('check')}<span>Free trial active until ${dt(t.endsAt)}</span></p>`
+    : effPlan() !== 'basic' ? '' : trialUsed() ? `<p class="up-trial-note">${ic('lock')}<span>Your free trial has ended.</span></p>`
+    : `<button class="up-trial-btn" data-act="trial-start">${ic('star')}Start your free trial</button><p class="up-trial-note">30 days of Advanced analysis and Pro limits. No card needed.</p>`;
+  applyLocks();
+}
 const trackList = () => store.get(uKey('track'), []);
 const usage = () => ({projects:favs().length, reports:reportsOf().length, tracked:trackList().length});
 const canAdd = kind => usage()[kind] < planOf().limits[kind];
@@ -1243,12 +1295,15 @@ function usageMeters(){
   return Object.keys(LIMIT_LABEL).map(k => { const l = p.limits[k], pct = l === Infinity ? 8 : Math.min(100, Math.round(u[k] / l * 100)); return `<div class="use"><div class="use-h"><span>${LIMIT_LABEL[k][0].toUpperCase() + LIMIT_LABEL[k].slice(1)}</span><b>${u[k]} / ${lim(l)}</b></div><div class="meter"><span style="width:${pct}%;background:${pct >= 100 ? 'var(--amber)' : 'var(--cyan)'}"></span></div></div>`; }).join('');
 }
 function renderPlans(){
-  const cur = subOf().plan, req = orgReq();
+  const cur = subOf().plan, req = orgReq(), tr = trialOf(), tu = trialUsed();
+  const trialBox = cur !== 'basic' ? '' : tr ? `<div class="trial-box on">${ic('check')}<div><b>Free trial active</b><span>${trialDaysLeft(tr)} day${trialDaysLeft(tr) > 1 ? 's' : ''} left (ends ${dt(tr.endsAt)}). Advanced analysis and Pro limits are unlocked.</span></div><button class="btn-primary" data-act="plan-pro">Keep Pro</button></div>`
+    : tu ? `<div class="trial-box">${ic('lock')}<div><b>Your free trial has ended</b><span>Upgrade to Pro to unlock the Advanced analysis again.</span></div><button class="btn-primary" data-act="plan-pro">Upgrade to Pro</button></div>`
+    : `<div class="trial-box">${ic('star')}<div><b>Try Pro free for 30 days</b><span>Unlock the Advanced analysis and the Pro limits. Demo only: no card needed.</span></div><button class="btn-primary" data-act="trial-start">Start your free trial for a month</button></div>`;
   const card = p => {
     const isCur = cur === p.id;
     let cta;
     if(p.id === 'basic') cta = isCur ? '<button class="btn-secondary" disabled>Current plan</button>' : '<button class="btn-secondary" data-act="plan-basic">Switch to Basic</button>';
-    else if(p.id === 'pro') cta = isCur ? '<button class="btn-secondary" disabled>Current plan</button>' : '<button class="btn-primary" data-act="plan-pro">Upgrade to Pro</button>';
+    else if(p.id === 'pro') cta = isCur ? '<button class="btn-secondary" disabled>Current plan</button>' : (cur === 'basic' && !trialUsed()) ? '<button class="btn-primary" data-act="trial-start">Start 30-day free trial</button><button class="btn-secondary" data-act="plan-pro">Upgrade to Pro</button>' : '<button class="btn-primary" data-act="plan-pro">Upgrade to Pro</button>';
     else cta = isCur ? '<button class="btn-secondary" disabled>Current plan</button>' : `<button class="btn-primary" data-act="plan-org">${ic('mail')}${req ? 'Update contact request' : 'Contact sales'}</button>`;
     return `<article class="plan${p.id === 'pro' ? ' plan-hot' : ''}${isCur ? ' plan-cur' : ''}">${p.id === 'pro' ? '<span class="plan-tag">Most popular</span>' : ''}${isCur ? '<span class="plan-tag cur">Your plan</span>' : ''}
       <h3>${p.name}</h3><p class="plan-blurb">${p.blurb}</p><p class="plan-price"><b>${p.price}</b> <span>${p.per}</span></p>
@@ -1257,6 +1312,7 @@ function renderPlans(){
       <div class="plan-cta">${cta}</div></article>`;
   };
   $('#pagePlans').innerHTML = `<div class="page-in"><header class="page-h"><div><h1>${ic('star')}Plans &amp; subscription</h1><p>Choose the plan that fits how you use Earthanova. Pro is self-service. The Organization plan is set up with our team: send us a request and we will get in touch.</p></div></header>
+    ${trialBox}
     <div class="plan-grid">${Object.values(PLANS).map(card).join('')}</div>
     <div class="card plan-use"><h2>${ic('bars')}Your usage on the ${planOf().name} plan</h2><div class="use-grid">${usageMeters()}</div></div>
     <p class="muted foot">Prototype note: billing is simulated in this demo. No card is charged and no payment details are collected.</p></div>`;
@@ -1300,11 +1356,11 @@ function renderProfile(){
         <fieldset><legend>Default dashboard view</legend><div class="seg" role="group" aria-label="Default view"><button type="button" data-setview="basic">${ic('eye')}Basic</button><button type="button" data-setview="advanced">${ic('flask')}Advanced</button><button type="button" data-setview="playful">${ic('bolt')}Playful</button></div></fieldset>
         <p class="form-err" id="pfErr" role="alert"></p><div class="btn-row"><button class="btn-primary" type="submit">Save changes</button></div></form></section>
     <aside class="prof-side">
-      <section class="card"><h2>${ic('star')}Subscription</h2><div class="sub-plan"><span class="tag mint">${plan.name}</span><span class="lvl lvl-low">${sub.status === 'active' ? 'Active' : sub.status}</span></div>
-        <dl class="sub-dl"><div><dt>Plan</dt><dd>${plan.name} · ${plan.price} ${plan.per}</dd></div><div><dt>Started</dt><dd>${dt(sub.since)}</dd></div><div><dt>${sub.plan === 'pro' ? 'Renews' : 'Billing'}</dt><dd>${sub.plan === 'pro' ? dt(sub.renews) : sub.plan === 'basic' ? 'No charge' : 'Managed by our team'}</dd></div></dl>
+      <section class="card"><h2>${ic('star')}Subscription</h2><div class="sub-plan"><span class="tag mint">${plan.name}</span>${trialOf() ? `<span class="tag cyan">Pro trial · ${trialDaysLeft(trialOf())} d left</span>` : ''}<span class="lvl lvl-low">${sub.status === 'active' ? 'Active' : sub.status}</span></div>
+        <dl class="sub-dl"><div><dt>Plan</dt><dd>${plan.name} · ${plan.price} ${plan.per}</dd></div><div><dt>Started</dt><dd>${dt(sub.since)}</dd></div><div><dt>${sub.plan === 'pro' ? 'Renews' : 'Billing'}</dt><dd>${sub.plan === 'pro' ? dt(sub.renews) : sub.plan === 'basic' ? 'No charge' : 'Managed by our team'}</dd></div>${sub.plan === 'basic' ? `<div><dt>Free trial</dt><dd>${trialOf() ? `Active until ${dt(trialOf().endsAt)}` : trialUsed() ? 'Used' : `Available: ${TRIAL_DAYS} days`}</dd></div>` : ''}</dl>
         ${req ? `<p class="plan-note">${ic('mail')}Organization request sent ${ago(req.at)} (${esc(req.status)}).</p>` : ''}
         <div class="use-grid">${usageMeters()}</div>
-        <div class="btn-row"><button class="btn-primary" data-nav="plans">Manage plan</button>${sub.plan === 'pro' ? '<button class="btn-secondary" data-act="plan-cancel">Cancel Pro</button>' : ''}</div>
+        <div class="btn-row">${sub.plan === 'basic' && !trialUsed() ? '<button class="btn-primary" data-act="trial-start">Start free trial</button>' : ''}<button class="${sub.plan === 'basic' && !trialUsed() ? 'btn-secondary' : 'btn-primary'}" data-nav="plans">Manage plan</button>${sub.plan === 'pro' ? '<button class="btn-secondary" data-act="plan-cancel">Cancel Pro</button>' : ''}</div>
         <h3>History</h3><ul class="hist">${(sub.history || []).slice(0, 5).map(h => `<li><b>${esc(h.note)}</b><span>${dt(h.at)}</span></li>`).join('')}</ul></section>
       <section class="card"><h2>${ic('lock')}Password</h2><form class="form" id="pwForm" novalidate><label>Current password<input id="pwOld" type="password" autocomplete="current-password"></label><label>New password<input id="pwNew" type="password" autocomplete="new-password" placeholder="At least 6 characters"></label><label>Repeat new password<input id="pwNew2" type="password" autocomplete="new-password"></label><p class="form-err" id="pwErr" role="alert"></p><button class="btn-secondary" type="submit">Update password</button></form></section>
       <section class="card"><h2>${ic('file')}Your data</h2><div class="btn-row"><button class="btn-secondary" data-act="export-data">${ic('download')}Export my data</button><button class="btn-secondary" data-act="logout">${ic('logout')}Log out</button></div><button class="link-btn danger" data-act="delete-account">Delete my account</button></section>
@@ -1640,7 +1696,7 @@ document.addEventListener('click', e => {
   const t = e.target;
   const nav = t.closest('[data-nav]'); if(nav){ go(nav.dataset.nav); return; }
   const nl = t.closest('[data-nav-link]'); if(nl){ go(nl.dataset.navLink); return; }
-  const sv = t.closest('[data-setview]'); if(sv){ setView(sv.dataset.setview); return; }
+  const sv = t.closest('[data-setview]'); if(sv){ const v = sv.dataset.setview; if(v === 'advanced' && !hasAdvanced() && S.page !== 'dashboard'){ trialDialog(); return; } setView(v); return; }
   if(!t.closest('#userMenu')) closeUserPop();
   const ts = t.closest('[data-trk-sel]'); if(ts){ T.sel = ts.dataset.trkSel; if(ts.dataset.trkTower != null) T.tower = +ts.dataset.trkTower; $$('#trkChips [data-trk-sel]').forEach(x => x.setAttribute('aria-selected', x.dataset.trkSel === T.sel)); drawTrackStage(); renderTrackMatrix(trackList()); return; }
   const tt = t.closest('#trkTowers [data-trk-tower]'); if(tt){ pickTrackTower(+tt.dataset.trkTower); return; }
@@ -1665,6 +1721,7 @@ document.addEventListener('click', e => {
     if(r){ renderReports(); toast('Report saved.'); if(act === 'report-save-pdf') openReport(r, true); }
   }
   else if(act === 'plan-pro') proDialog();
+  else if(act === 'trial-start') startTrial();
   else if(act === 'plan-org') orgDialog();
   else if(act === 'plan-basic') showDialog({title:'Switch to Basic?', body:'<p>Basic includes 3 projects, 3 saved reports and 1 tracked region. Items you already have are kept, but you will not be able to add more until you are under the limits.</p>', actions:[{label:'Stay on my plan'}, {label:'Switch to Basic', cls:'btn-primary', fn:() => { setPlan('basic', 'Switched to Basic'); toast('You are on the Basic plan.'); rerenderAccountPages(); }}]});
   else if(act === 'plan-cancel') showDialog({title:'Cancel Pro?', body:'<p>You will move to the Basic plan right away. Your data is kept, but Basic has lower limits.</p>', actions:[{label:'Keep Pro'}, {label:'Cancel Pro', cls:'btn-primary', fn:() => { setPlan('basic', 'Pro cancelled'); toast('Pro cancelled. You are on Basic.'); rerenderAccountPages(); }}]});
