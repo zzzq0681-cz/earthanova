@@ -918,3 +918,39 @@ body:is([data-page="plans"],[data-page="profile"],[data-page="tracking"],[data-p
 .nasa-cav{margin:6px 0 4px;padding-left:16px;font-size:.76rem;line-height:1.4;color:#FFBE55}
 .nasa .btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .nasa .muted{color:#9fb7c6;font-size:.78rem}
+
+/* ---------- hazard charts (Risk page) ---------- */
+.hz-charts{display:grid;gap:14px;margin:14px 0 4px}
+.hz-fig{margin:0;padding:12px 12px 10px;border-radius:12px;border:1px solid var(--line-2);background:rgba(6,17,31,.45)}
+.hz-fig figcaption{display:flex;flex-direction:column;gap:2px;margin-bottom:6px}
+.hz-fig figcaption b{font:600 13.5px var(--f-head);color:var(--ink)}
+.hz-fig figcaption span{font-size:12px;color:var(--ink-2)}
+.hz-wrap{position:relative}
+.hz-plot{display:block;width:100%;height:auto;overflow:visible}
+.hz-plot .hz-grid{stroke:rgba(145,174,194,.14);stroke-width:1}
+.hz-plot .hz-ax{fill:var(--ink-2);font:11px var(--f-body);font-variant-numeric:tabular-nums}
+.hz-plot .hz-val{fill:var(--ink);font:600 11.5px var(--f-head);font-variant-numeric:tabular-nums}
+.hz-plot .hz-ref{stroke:var(--ink-2);stroke-width:1;stroke-dasharray:3 4;opacity:.7}
+.hz-plot .hz-ref-t{fill:var(--ink-2);font:10.5px var(--f-body)}
+.hz-plot .hz-trend{stroke:var(--amber);stroke-width:2;stroke-dasharray:6 4;stroke-linecap:round}
+.hz-plot .hz-xh{stroke:var(--ink-2);stroke-dasharray:2 3;opacity:0;pointer-events:none}
+.hz-plot .hz-bar{transition:filter .12s}
+.hz-plot .hz-bar.is-hover{filter:brightness(1.3)}
+.hz-plot .hz-hit{cursor:crosshair}
+.hz-tip{font-size:12px;line-height:1.55;z-index:3}
+.hz-tip>span:first-child{display:block;color:var(--ink-2)}
+.hz-legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:6px;color:var(--ink-2);font-size:12px}
+.hz-key{display:inline-block;margin-right:6px;vertical-align:middle}
+.hz-key-rect{width:10px;height:10px;border-radius:3px;background:var(--c)}
+.hz-key-line{width:14px;height:2px;border-radius:2px;background:var(--c)}
+.hz-key-dash{width:14px;height:0;border-top:2px dashed var(--c)}
+.hz-key-dot{width:9px;height:9px;border-radius:50%;background:var(--c)}
+.hz-key-wash{width:14px;height:10px;border-radius:3px;background:var(--c);opacity:.25}
+.hz-table{margin-top:8px;color:var(--ink-2);font-size:12px}
+.hz-table summary{cursor:pointer;width:max-content}
+.hz-table summary:hover{color:var(--ink)}
+.hz-table .tbl-scroll{max-height:200px;overflow:auto;margin-top:6px}
+.hz-analysis{margin:0 0 6px;padding:0 0 0 18px;color:var(--ink);font-size:13px;line-height:1.55}
+.hz-analysis li{margin:0 0 5px}
+.hz-analysis li::marker{color:var(--cyan)}
+.hz-note{margin:6px 0 0;padding:8px 10px;border-radius:10px;border:1px solid rgba(255,190,85,.35);background:rgba(255,190,85,.06);color:var(--ink-2);font-size:12px;line-height:1.5}

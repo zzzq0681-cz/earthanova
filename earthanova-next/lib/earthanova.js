@@ -2,6 +2,7 @@
  * It drives the server-rendered markup in components/EarthanovaMarkup.tsx imperatively,
  * and is loaded once, client-side only, by components/EarthanovaClient.tsx. */
 import Globe from 'globe.gl';
+import {towerViz, renderChart, wireCharts} from './hazard-charts.js';
 import {eonetEvents, nasaHazards, nasaWindow, nasaFind, nasaEnsure, nasaLoad, nasaBuildAnalysis, isStatic, reportUrl} from './nasa-data.js';
 
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
@@ -181,6 +182,7 @@ async function usgsQuakes(loc, radiusKm, period){
   const j = await getJSON(`https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude=${loc.lat}&longitude=${loc.lon}&maxradiuskm=${radiusKm}&starttime=${period.start}-01-01&endtime=${period.end}-12-31&minmagnitude=4&orderby=magnitude&limit=200`, 15000);
   const f = j.features || [];
   return {count:f.length, maxMag: f.length ? Math.max(...f.map(q => q.properties.mag)) : null,
+    all: f.map(q => ({mag:q.properties.mag, time:q.properties.time})),
     list: f.slice(0, 25).map(q => ({mag:q.properties.mag, place:q.properties.place, time:q.properties.time, url:q.properties.url,
       dist: Math.round(haversine(loc.lat, loc.lon, q.geometry.coordinates[1], q.geometry.coordinates[0]))}))};
 }
@@ -602,12 +604,20 @@ function renderTowerList(levels){
 function renderTowerDetail(){
   if(!S.H) return;
   const h = HAZARDS[S.hazard], r = S.H[h.id], lv = LEVEL[r.level];
+  let viz = {charts:[], analysis:[], note:''}, figs = '', tips = {};
+  try{
+    const pd = per(S.A); viz = towerViz(h.id, S.A, {years:pd.years, baseLabel:pd.baseLabel, curLabel:pd.curLabel});
+    figs = viz.charts.map((c, i) => { const o = renderChart(c, `${h.id}${i}`); tips[`${h.id}${i}`] = o.tips; return o.html; }).join('');
+  }catch(e){ console.warn('hazard charts', e); }
   $('#towerDetail').innerHTML = `<header><span class="td-ic" style="color:${lv[1]}">${ic(h.icon)}</span><div><p class="td-code">${h.code} · ${h.hazard}</p><h3>${h.name}</h3></div><span class="lvl lvl-${r.level}">${lv[0]}</span></header>
     <div class="meter" role="img" aria-label="Risk score ${r.score} out of 100"><span style="width:${r.score}%;background:${lv[1]}"></span></div>
     <p class="td-head">${esc(r.headline)}</p><p class="td-exp">${esc(r.explain)}</p>
     ${r.metrics.length ? `<div class="kv">${r.metrics.map(m => `<div><span>${esc(m[0])}</span><b>${esc(m[1])}</b></div>`).join('')}</div>` : ''}
+    ${figs ? `<section class="hz-charts" aria-label="Charts for ${esc(h.name)}">${figs}</section>` : (r.level === 'na' ? '' : '<p class="td-exp">No chart is available for this tower with the data loaded.</p>')}
+    ${viz.analysis.length ? `<h4>Analysis</h4><ul class="hz-analysis">${viz.analysis.map(t => `<li>${esc(t)}</li>`).join('')}</ul>${viz.note ? `<p class="hz-note">${esc(viz.note)}</p>` : ''}` : ''}
     ${r.items.length ? `<h4>Recent events</h4><ul class="list">${r.items.map(e => `<li><div class="grow"><b>${esc(e.title)}</b><span>${esc(e.meta)}</span></div>${e.url ? `<a class="link-btn" href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.tag || 'USGS')}</a>` : ''}</li>`).join('')}</ul>` : ''}
     <p class="td-src">Source: ${esc(h.src)}. Screening only. This is not an official hazard assessment or warning system.</p>`;
+  wireCharts($('#towerDetail'), tips);
 }
 function renderRisk(){
   const has = !!S.A;
