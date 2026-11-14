@@ -88,7 +88,8 @@ const PRESETS = [
   {name:'Alexandria, Egypt', short:'Alexandria', lat:31.2, lon:29.92, featured:true},
   {name:'Cairo, Egypt', short:'Cairo', lat:30.04, lon:31.24},
   {name:'Riyadh, Saudi Arabia', short:'Riyadh', lat:24.71, lon:46.68},
-  {name:'Singapore', short:'Singapore', lat:1.35, lon:103.82}
+  {name:'Singapore', short:'Singapore', lat:1.35, lon:103.82},
+  {name:'Aswan, Egypt', short:'Aswan', lat:24.09, lon:32.9}
 ].map(withId);
 function withId(l){ return {...l, lat:+(+l.lat).toFixed(4), lon:+(+l.lon).toFixed(4), id:`${(+l.lat).toFixed(2)},${(+l.lon).toFixed(2)}`}; }
 const uKey = k => `es:${k}:${S.user?.id || 'guest'}`;
@@ -240,7 +241,7 @@ const sgn = (v, d=1) => v == null ? '—' : (v > 0 ? '+' : v < 0 ? '−' : '±')
 const pct = (a, b) => (a == null || b == null || a === 0) ? null : Math.round((b - a) / Math.abs(a) * 100);
 function interpret(A){
   const dT = A.cur.temp != null && A.base.temp != null ? round(A.cur.temp - A.base.temp, 1) : null;
-  const dRain = pct(A.base.rain, A.cur.rain), drySoil = A.base.soil != null && A.base.soil < 0.05, dSoil = drySoil ? null : pct(A.base.soil, A.cur.soil);
+  const dryRain = A.base.rain != null && A.base.rain < 20, dRain = dryRain ? null : pct(A.base.rain, A.cur.rain), drySoil = A.base.soil != null && A.base.soil < 0.05, dSoil = drySoil ? null : pct(A.base.soil, A.cur.soil);
   const dHot = A.cur.hot != null && A.base.hot != null ? round(A.cur.hot - A.base.hot, 1) : null;
   const flags = [];
   if(dT != null && dT >= 0.5) flags.push({k:'climate', t:`Warming ${sgn(dT)} °C`});
@@ -990,7 +991,7 @@ async function scan(force = false){
       store.set(key, A);
     }catch(e){
       if(token !== S.token) return;
-      sp.classList.add('has-error'); $('#spErrMsg').textContent = `${e.message || 'Request failed.'}${e.userFacing ? ' Try Alexandria, Cairo, Riyadh or Singapore.' : ' Check your internet connection and try again.'}`;
+      sp.classList.add('has-error'); $('#spErrMsg').textContent = `${e.message || 'Request failed.'}${e.userFacing ? ' Try Alexandria, Cairo, Aswan, Riyadh or Singapore.' : ' Check your internet connection and try again.'}`;
       $('#sbChip').className = 'chip bad'; $('#sbChip span').textContent = 'Error'; announce('Scan failed. ' + (e.message || '')); return;
     }
   }
