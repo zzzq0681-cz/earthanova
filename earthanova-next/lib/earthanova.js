@@ -2,7 +2,7 @@
  * It drives the server-rendered markup in components/EarthanovaMarkup.tsx imperatively,
  * and is loaded once, client-side only, by components/EarthanovaClient.tsx. */
 import Globe from 'globe.gl';
-import {nasaFind, nasaEnsure, nasaLoad, nasaBuildAnalysis, isStatic, reportUrl} from './nasa-data.js';
+import {eonetEvents, nasaFind, nasaEnsure, nasaLoad, nasaBuildAnalysis, isStatic, reportUrl} from './nasa-data.js';
 
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -162,10 +162,24 @@ async function analyzeNasa(loc, radiusKm, onStep, period){
   }
   const bundle = await nasaLoad(hit.place.name).catch(e => { onStep('era5', false); throw e; });
   onStep('era5', true, 'NASA POWER');
-  ['cmip', 'hazard', 'air'].forEach(k => onStep(k, true, 'not loaded yet'));
+  ['cmip', 'air'].forEach(k => onStep(k, true, 'not loaded yet'));
+  const hazP = Promise.allSettled([eonetEvents(loc.lat, loc.lon, radiusKm, period), usgsQuakes(loc, radiusKm, period)]);
   let img = null;
   try{ img = await waybackPair(loc.lat, loc.lon, period); onStep('img', true); }catch{ onStep('img', false); }
-  return nasaBuildAnalysis(loc, radiusKm, bundle, img, period, hit, {mean, round, linreg});
+  const [eon, qk] = await hazP;
+  onStep('hazard', eon.status === 'fulfilled' || qk.status === 'fulfilled', 'NASA EONET + USGS');
+  const A = nasaBuildAnalysis(loc, radiusKm, bundle, img, period, hit, {mean, round, linreg});
+  A.eonet = eon.status === 'fulfilled' ? eon.value : null;
+  A.quakes = qk.status === 'fulfilled' ? qk.value : null;
+  return A;
+}
+/* USGS earthquake catalogue (NASA has no earthquake catalogue; EONET lists none), labelled as USGS in the UI. */
+async function usgsQuakes(loc, radiusKm, period){
+  const j = await getJSON(`https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude=${loc.lat}&longitude=${loc.lon}&maxradiuskm=${radiusKm}&starttime=${period.start}-01-01&endtime=${period.end}-12-31&minmagnitude=4&orderby=magnitude&limit=200`, 15000);
+  const f = j.features || [];
+  return {count:f.length, maxMag: f.length ? Math.max(...f.map(q => q.properties.mag)) : null,
+    list: f.slice(0, 25).map(q => ({mag:q.properties.mag, place:q.properties.place, time:q.properties.time, url:q.properties.url,
+      dist: Math.round(haversine(loc.lat, loc.lon, q.geometry.coordinates[1], q.geometry.coordinates[0]))}))};
 }
 /* Previous Open-Meteo / USGS implementation, no longer used for the climate record. */
 async function analyzeLegacy(loc, radiusKm, onStep, period){
@@ -251,6 +265,10 @@ function interpret(A){
   if(dHot != null && dHot >= 5) flags.push({k:'land', t:`Hot days ${sgn(dHot,0)}/yr`});
   if(A.elev != null && A.elev > 0 && A.elev < 10) flags.push({k:'hazard', t:`Low-lying (${Math.round(A.elev)} m)`});
   if(A.quakes && (A.quakes.maxMag >= 5.5 || A.quakes.count >= 10)) flags.push({k:'hazard', t:`Seismic: ${A.quakes.count} M4+ in ${per(A).label} (max M${A.quakes.maxMag.toFixed(1)})`});
+  if(A.eonet){ const b = A.eonet.byCat;
+    if(b.wildfires.length >= 5) flags.push({k:'hazard', t:`Wildfires: ${b.wildfires.length} NASA EONET events within ${A.radiusKm} km`});
+    if(b.severeStorms.length >= 3) flags.push({k:'hazard', t:`Severe storms: ${b.severeStorms.length} tracks within ${A.radiusKm} km`});
+    if(b.volcanoes.length) flags.push({k:'hazard', t:`Volcanic activity reported within ${A.radiusKm} km`}); }
   if(A.aq && A.aq.pm25 > 35) flags.push({k:'hazard', t:`PM2.5 ${A.aq.pm25} µg/m³`});
   const climateFlags = flags.filter(f => f.k !== 'hazard'), hazardFlags = flags.filter(f => f.k === 'hazard');
   const status = [
@@ -453,12 +471,12 @@ const refreshMosaics = () => mosaics.forEach(m => { delete m.dataset.key; render
 
 /* ---------- hazard towers (Risk Monitoring) ---------- */
 const HAZARDS = [
-  {id:'quake', code:'T-01', name:'Seismic Tower', hazard:'Earthquakes', icon:'quake', src:'USGS Earthquake Catalog, M4+ events in the study period'},
-  {id:'heat', code:'T-02', name:'Heat Tower', hazard:'Extreme heat', icon:'flame', src:'ERA5 reanalysis, daily maximum temperature'},
-  {id:'drought', code:'T-03', name:'Drought Tower', hazard:'Drought', icon:'soil', src:'ERA5 rainfall and soil moisture'},
-  {id:'flood', code:'T-04', name:'Flood Tower', hazard:'Floods', icon:'drop', src:'ERA5 rainfall with Copernicus DEM elevation'},
-  {id:'air', code:'T-05', name:'Air Quality Tower', hazard:'Air pollution', icon:'wind', src:'CAMS PM2.5, last 90 days'},
-  {id:'sea', code:'T-06', name:'Low-Land Tower', hazard:'Sea-level exposure', icon:'waves', src:'Copernicus DEM elevation'}
+  {id:'quake', code:'T-01', name:'Seismic & Volcanic Tower', hazard:'Earthquakes and volcanoes', icon:'quake', src:'USGS Earthquake Catalog (M4+) and NASA EONET volcano reports, study period'},
+  {id:'heat', code:'T-02', name:'Heat Tower', hazard:'Extreme heat', icon:'sun', src:'NASA POWER (MERRA-2) temperature'},
+  {id:'drought', code:'T-03', name:'Drought Tower', hazard:'Drought', icon:'soil', src:'NASA POWER soil wetness and NASA GPM IMERG rainfall'},
+  {id:'flood', code:'T-04', name:'Flood Tower', hazard:'Floods and landslides', icon:'drop', src:'NASA GPM IMERG rainfall change and NASA EONET flood and landslide events (GDACS)'},
+  {id:'fire', code:'T-05', name:'Wildfire Tower', hazard:'Wildfires', icon:'flame', src:'NASA EONET wildfire events (IRWIN, GDACS)'},
+  {id:'storm', code:'T-06', name:'Storm Tower', hazard:'Severe storms and cyclones', icon:'wind', src:'NASA EONET severe storms (NOAA NHC, JTWC, GDACS)'}
 ];
 const LEVEL = {low:['Low','#36E2B1'], moderate:['Moderate','#FFBE55'], high:['High','#FF6178'], na:['No data','#91AEC2'], scanning:['Scanning','#22D3EE']};
 const clamp = (v, a=0, b=100) => Math.max(a, Math.min(b, v));
@@ -471,40 +489,62 @@ function hazardReadings(A, I){
     headline:q.count ? `${q.count} earthquake${q.count > 1 ? 's' : ''} of M4+ in ${per(A).label}` : `No M4+ earthquakes in ${per(A).label}`,
     explain:`Counted within ${A.radiusKm} km of the target. Rated moderate when the largest event reaches M5.5 or there are 10 or more events, and high at M6.5 or 30 or more.`,
     metrics:[['Events M4+', q.count], ['Largest', mq != null ? 'M' + mq.toFixed(1) : '—'], ['Search radius', A.radiusKm + ' km']],
-    items:q.list.slice(0, 6).map(e => ({title:`M${e.mag.toFixed(1)} · ${e.place || 'Unknown location'}`, meta:`${new Date(e.time).toISOString().slice(0,10)} · ${e.dist} km away`, url:e.url}))};
+    items:q.list.slice(0, 6).map(e => ({title:`M${e.mag.toFixed(1)} · ${e.place || 'Unknown location'}`, meta:`${new Date(e.time).toISOString().slice(0,10)} · ${e.dist} km away`, url:e.url, tag:'USGS'}))};
   const dT = I.dT, dHot = I.dHot;
-  H.heat = (dT == null && dHot == null) ? {level:'na', score:0, headline:'No temperature record', explain:'ERA5 temperatures were not available.', metrics:[], items:[]} : {
+  H.heat = (dT == null && dHot == null) ? {level:'na', score:0, headline:'No temperature record', explain:'NASA POWER temperatures were not available.', metrics:[], items:[]} : {
     level:((dHot ?? 0) >= 15 || (dT ?? 0) >= 1) ? 'high' : ((dHot ?? 0) >= 5 || (dT ?? 0) >= 0.5) ? 'moderate' : 'low',
     score:Math.round(clamp(Math.max((dHot ?? 0) / 15, (dT ?? 0) / 1) * 100)),
     headline:dT != null && dT >= 0.3 ? `Warming ${sgn(dT)} °C vs ${per(A).baseLabel}` : 'No strong warming signal',
     explain:`Compares ${per(A).curLabel} with the ${per(A).baseLabel} baseline. Rated moderate at +0.5 °C or +5 hot days a year, and high at +1 °C or +15 hot days (a hot day is ${A.hotBase} °C or more).`,
     metrics:[['Temperature change', sgn(dT) + ' °C'], [`Days ≥ ${A.hotBase} °C`, `${A.base.hot ?? '—'} → ${A.cur.hot ?? '—'} / yr`], ['Trend', A.trend ? sgn(A.trend.slope, 2) + ' °C/yr' : 'n/a']], items:[]};
   const dr = I.dRain, ds = I.drySoil ? null : I.dSoil, arid = A.base.rain != null && A.base.rain < 150;
-  H.drought = (dr == null && ds == null) ? {level:'na', score:0, headline:'No rainfall record', explain:'ERA5 rainfall and soil moisture were not available.', metrics:[], items:[]} : {
+  H.drought = (dr == null && ds == null) ? {level:'na', score:0, headline:'No rainfall record', explain:'NASA POWER soil wetness and NASA GPM IMERG rainfall were not available.', metrics:[], items:[]} : {
     level:((dr ?? 0) <= -25 || (ds ?? 0) <= -25) ? 'high' : ((dr ?? 0) <= -15 || (ds ?? 0) <= -15) ? 'moderate' : 'low',
     score:Math.round(clamp(Math.max(-(dr ?? 0) / 25, -(ds ?? 0) / 25) * 100)),
     headline:dr != null && dr <= -10 ? `Rainfall down ${Math.abs(dr)}%` : 'Rainfall close to normal',
     explain:`Looks for falling rainfall or soil moisture compared with ${per(A).baseLabel}. Rated moderate below −15% and high below −25%.${arid ? ' This is a very dry region, so small changes in millimetres can look large in percent.' : ''}`,
     metrics:[['Rainfall change', dr == null ? (I.dryRain ? 'Hyper-arid' : 'n/a') : sgn(dr, 0) + '%'], ['Annual rain', `${A.base.rain ?? '—'} → ${A.cur.rain ?? '—'} mm`], ['Soil moisture', I.drySoil ? 'Very dry' : ds == null ? 'n/a' : sgn(ds, 0) + '%']], items:[]};
   const low = A.elev != null && A.elev < 10;
-  H.flood = dr == null ? {level:'na', score:0, headline:'No rainfall record', explain:'ERA5 rainfall was not available.', metrics:[], items:[]} : {
+  H.flood = dr == null ? {level:'na', score:0, headline:'No rainfall record', explain:'NASA GPM IMERG rainfall was not available.', metrics:[], items:[]} : {
     level:(dr >= 40 || (dr >= 20 && low)) ? 'high' : (dr >= 20 || (low && dr >= 10)) ? 'moderate' : 'low',
     score:Math.round(clamp((Math.max(dr, 0) / 40) * 100 + (low ? 15 : 0))),
     headline:dr >= 20 ? `Rainfall up ${dr}%` : low ? 'Low ground, rainfall steady' : 'No flood signal',
     explain:'Looks for rising rainfall, made more serious on low ground. Moderate at +20%, high at +40%, or +20% on land below 10 m.',
     metrics:[['Rainfall change', sgn(dr, 0) + '%'], ['Elevation', A.elev != null ? Math.round(A.elev) + ' m' : 'n/a'], ['Annual rain', `${A.base.rain ?? '—'} → ${A.cur.rain ?? '—'} mm`]], items:[]};
-  H.air = !A.aq ? {level:'na', score:0, headline:'Air quality unavailable', explain:'CAMS data could not be loaded for this point.', metrics:[], items:[]} : {
-    level:A.aq.pm25 > 35 ? 'high' : A.aq.pm25 > 15 ? 'moderate' : 'low',
-    score:Math.round(clamp(A.aq.pm25 / 35 * 100)),
-    headline:`PM2.5 averages ${A.aq.pm25} µg/m³`,
-    explain:'Fine particles (PM2.5) averaged over the last 90 days. Moderate above 15 µg/m³, high above 35 µg/m³ (WHO guideline is 15 for a daily mean).',
-    metrics:[['PM2.5 (90 days)', A.aq.pm25 + ' µg/m³'], ['WHO daily guide', '15 µg/m³'], ['Period', `${(A.aq.from || '').slice(0,10)} → ${(A.aq.to || '').slice(0,10)}`]], items:[]};
-  H.sea = A.elev == null ? {level:'na', score:0, headline:'Elevation unavailable', explain:'Copernicus DEM elevation could not be loaded.', metrics:[], items:[]} : {
-    level:A.elev < 5 ? 'high' : A.elev < 10 ? 'moderate' : 'low',
-    score:Math.round(clamp((15 - A.elev) / 15 * 100)),
-    headline:A.elev < 10 ? `Low-lying land (${Math.round(A.elev)} m)` : `Ground is ${Math.round(A.elev)} m above sea level`,
-    explain:'Height of the target point above sea level. Below 10 m is moderate and below 5 m is high. This is an elevation screen only: it does not check how close the sea is.',
-    metrics:[['Elevation', Math.round(A.elev) + ' m'], ['Moderate below', '10 m'], ['High below', '5 m']], items:[]};
+  const eo = A.eonet, EV = k => eo ? (eo.byCat[k] || []) : null;
+  const items = (list, tag) => list.slice(0, 6).map(e => ({title:e.title, meta:`${e.date} · ${e.dist} km away${e.mag ? ' · ' + e.mag : ''}`, url:e.url, tag}));
+  const trunc = eo && eo.truncated ? ' (list truncated at 1000 events, true count is higher)' : '';
+  const fires = EV('wildfires');
+  H.fire = !fires ? {level:'na', score:0, headline:'NASA EONET unavailable', explain:'The NASA EONET event service could not be reached during this scan.', metrics:[], items:[]} : {
+    level:fires.length >= 20 ? 'high' : fires.length >= 5 ? 'moderate' : 'low',
+    score:Math.round(clamp(fires.length / 20 * 100)),
+    headline:fires.length ? `${fires.length} wildfire event${fires.length > 1 ? 's' : ''} within ${A.radiusKm} km in ${per(A).label}${trunc}` : `No wildfire events listed within ${A.radiusKm} km in ${per(A).label}`,
+    explain:'Counts wildfire events that NASA EONET lists (sources such as IRWIN and GDACS, mostly large fires). It is not a complete fire census and coverage is best in North America, so "none" does not prove there is no fire risk. Moderate at 5 events, high at 20.',
+    metrics:[['Events listed', fires.length], ['Largest', (() => { const m = fires.filter(e => e.magValue != null).sort((a, b) => b.magValue - a.magValue)[0]; return m ? `${Math.round(m.magValue)} ${m.magUnit}` : '—'; })()], ['Search radius', A.radiusKm + ' km']],
+    items:items(fires, 'NASA EONET')};
+  const storms = EV('severeStorms');
+  H.storm = !storms ? {level:'na', score:0, headline:'NASA EONET unavailable', explain:'The NASA EONET event service could not be reached during this scan.', metrics:[], items:[]} : {
+    level:storms.length >= 10 ? 'high' : storms.length >= 3 ? 'moderate' : 'low',
+    score:Math.round(clamp(storms.length / 10 * 100)),
+    headline:storms.length ? `${storms.length} severe storm${storms.length > 1 ? 's' : ''} passed within ${A.radiusKm} km in ${per(A).label}${trunc}` : `No severe storms listed within ${A.radiusKm} km in ${per(A).label}`,
+    explain:'Counts tropical cyclones and other severe storms that NASA EONET lists (NOAA NHC, JTWC, GDACS) whose track came within the search radius. Inland and mid-latitude storms are under-reported. Moderate at 3 storms, high at 10.',
+    metrics:[['Storms listed', storms.length], ['Strongest', (() => { const m = storms.filter(e => e.magValue != null).sort((a, b) => b.magValue - a.magValue)[0]; return m ? `${m.magValue} ${m.magUnit}` : '—'; })()], ['Search radius', A.radiusKm + ' km']],
+    items:items(storms, 'NASA EONET')};
+  /* fold NASA EONET events into the towers they belong to */
+  const RANK = {na:0, low:1, moderate:2, high:3};
+  const fold = (r, lv, score, head, its, metric, note) => {
+    const was = r.level === 'na';
+    if(RANK[lv] > RANK[r.level]) r.level = lv;
+    r.score = Math.max(r.score, Math.round(score));
+    const neutral = was || /^No /.test(r.headline);
+    r.headline = neutral ? head : `${r.headline}; ${head}`;
+    r.explain = was ? note : `${r.explain} ${note}`;
+    r.metrics = [...r.metrics, metric]; r.items = [...its, ...r.items];
+  };
+  const vol = EV('volcanoes') || [];
+  if(vol.length) fold(H.quake, vol.length >= 5 ? 'high' : 'moderate', clamp(vol.length / 5 * 100), `${vol.length} volcanic activity report${vol.length > 1 ? 's' : ''} within ${A.radiusKm} km`, items(vol, 'NASA EONET'), ['Volcano reports (EONET)', vol.length], 'Volcano reports come from NASA EONET (Smithsonian, GDACS and others); moderate with any report, high with 5 or more.');
+  const wet = [...(EV('floods') || []), ...(EV('landslides') || [])];
+  if(wet.length) fold(H.flood, wet.length >= 15 ? 'high' : wet.length >= 5 ? 'moderate' : 'low', clamp(wet.length / 15 * 100), `${wet.length} flood or landslide event${wet.length > 1 ? 's' : ''} listed within ${A.radiusKm} km`, items(wet, 'NASA EONET'), ['Flood/landslide events (EONET)', wet.length], 'Flood and landslide events come from NASA EONET (mostly GDACS); moderate at 5 events, high at 15.');
   return H;
 }
 const levelsOf = H => HAZARDS.map(h => H[h.id].level);
@@ -552,14 +592,14 @@ function renderTowerDetail(){
     <div class="meter" role="img" aria-label="Risk score ${r.score} out of 100"><span style="width:${r.score}%;background:${lv[1]}"></span></div>
     <p class="td-head">${esc(r.headline)}</p><p class="td-exp">${esc(r.explain)}</p>
     ${r.metrics.length ? `<div class="kv">${r.metrics.map(m => `<div><span>${esc(m[0])}</span><b>${esc(m[1])}</b></div>`).join('')}</div>` : ''}
-    ${r.items.length ? `<h4>Recent events</h4><ul class="list">${r.items.map(e => `<li><div class="grow"><b>${esc(e.title)}</b><span>${esc(e.meta)}</span></div>${e.url ? `<a class="link-btn" href="${esc(e.url)}" target="_blank" rel="noopener">USGS</a>` : ''}</li>`).join('')}</ul>` : ''}
+    ${r.items.length ? `<h4>Recent events</h4><ul class="list">${r.items.map(e => `<li><div class="grow"><b>${esc(e.title)}</b><span>${esc(e.meta)}</span></div>${e.url ? `<a class="link-btn" href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.tag || 'USGS')}</a>` : ''}</li>`).join('')}</ul>` : ''}
     <p class="td-src">Source: ${esc(h.src)}. Screening only. This is not an official hazard assessment or warning system.</p>`;
 }
 function renderRisk(){
   const has = !!S.A;
   $('#riskWrap').hidden = !has; $('#riskEmpty').hidden = has;
   if(!has) return;
-  $('#riskSub').textContent = `${S.loc.name} · scanned ${ago(S.A.fetchedAt)} · ${S.A.radiusKm} km radius. Hazard layers use other open sources (USGS, Open-Meteo, CAMS), not the NASA POWER climate record.`;
+  $('#riskSub').textContent = `${S.loc.name} · scanned ${ago(S.A.fetchedAt)} · ${S.A.radiusKm} km radius. Wildfires, storms, floods, landslides and volcanoes come from NASA EONET; earthquakes come from USGS (EONET has none); heat, drought and rainfall signals come from NASA POWER and GPM IMERG. Air quality and elevation are not loaded.`;
   refreshMosaics();
   const tok = ++S.riskTok, final = levelsOf(S.H), cur = HAZARDS.map(() => 'scanning');
   renderRiskStage(cur); renderTowerList(cur); renderTowerDetail();
@@ -736,7 +776,7 @@ function renderAdvanced(){
   $('#advHaz').innerHTML = `<table class="tbl"><thead><tr><th>Tower</th><th>Level</th><th>Score</th><th class="l">Finding</th></tr></thead><tbody>${towers}</tbody></table>
     <h3>Earthquakes M4+ within ${A.radiusKm} km, ${per(A).label}</h3>${A.quakes ? (quakes ? `<table class="tbl"><thead><tr><th>Date</th><th>Mag</th><th class="l">Place</th><th>Distance</th></tr></thead><tbody>${quakes}</tbody></table>` : '<div class="empty">None recorded.</div>') : '<div class="empty">USGS data unavailable.</div>'}`;
   $('#advExport').innerHTML = `<div class="btn-row"><button class="btn-primary" data-act="report-quick">${ic('file')}Save as report</button><button class="btn-secondary" data-act="csv">${ic('download')}Download CSV</button></div>
-    <p>Sources: ${A.nasa ? 'NASA POWER (MERRA-2 / CERES) monthly data; NASA GPM IMERG V07 rainfall; Esri World Imagery Wayback. Grid values (~50 km) can differ from station records.' : 'ERA5 reanalysis (ECMWF / Copernicus) and CMIP6 via Open-Meteo; USGS Earthquake Catalog; Copernicus DEM; CAMS air quality; Esri World Imagery Wayback. Grid values (~25 km) can differ from station records.'} Screening rules are simple thresholds, not an official assessment.</p>`;
+    <p>Sources: ${A.nasa ? 'NASA POWER (MERRA-2 / CERES) monthly data; NASA GPM IMERG V07 rainfall; NASA EONET natural events (wildfires, storms, floods, landslides, volcanoes; notable events only); USGS Earthquake Catalog; Esri World Imagery Wayback. Grid values (~50 km) can differ from station records.' : 'ERA5 reanalysis (ECMWF / Copernicus) and CMIP6 via Open-Meteo; USGS Earthquake Catalog; Copernicus DEM; CAMS air quality; Esri World Imagery Wayback. Grid values (~25 km) can differ from station records.'} Screening rules are simple thresholds, not an official assessment.</p>`;
 }
 
 /* Playful: quizzes and games */
@@ -1084,7 +1124,7 @@ function reportHTML(rep, autoPrint){
   ${has('years') ? `<h2>Yearly record (${A.nasa ? 'NASA POWER' : 'ERA5'})</h2><table><thead><tr><th>Year</th><th>Mean °C</th><th>Rain mm</th><th>Days ≥ ${A.hotBase} °C</th><th>Soil m³/m³</th><th>Solar kWh/m²/d</th></tr></thead><tbody>${tr}</tbody></table>` : ''}
   ${has('projection') && A.proj ? `<h2>Projection ${rng(per(A).projYears)} (CMIP6, bias-adjusted)</h2><table><thead><tr><th>Year</th><th>Model low</th><th>Ensemble mean</th><th>Model high</th></tr></thead><tbody>${pr}</tbody></table>` : ''}
   ${has('hazards') ? `<h2>Earthquakes M4+ within ${A.radiusKm} km, ${per(A).label}</h2>${A.quakes ? (A.quakes.list.length ? `<table><thead><tr><th>Date</th><th>Magnitude</th><th>Place</th><th>Distance</th></tr></thead><tbody>${A.quakes.list.slice(0,15).map(e => `<tr><td>${new Date(e.time).toISOString().slice(0,10)}</td><td>${e.mag.toFixed(1)}</td><td style="text-align:left">${esc(e.place)}</td><td>${e.dist} km</td></tr>`).join('')}</tbody></table>` : '<p>None recorded.</p>') : '<p>Unavailable.</p>'}` : ''}
-  <h2>Sources &amp; limitations</h2><p class="muted">${A.nasa ? 'NASA POWER (MERRA-2 / CERES) monthly data; NASA GPM IMERG V07 rainfall; Esri World Imagery Wayback. Grid-cell values (~50 km) may differ' : 'ERA5 reanalysis (Copernicus/ECMWF) and CMIP6 HighResMIP via Open-Meteo; USGS Earthquake Catalog; CAMS air quality; Copernicus DEM; Esri World Imagery Wayback. Grid-cell values (~25 km) may differ'} from station records. Screening rules are simple thresholds and not an official assessment. Projections are scenario-based, not forecasts.</p>
+  <h2>Sources &amp; limitations</h2><p class="muted">${A.nasa ? 'NASA POWER (MERRA-2 / CERES) monthly data; NASA GPM IMERG V07 rainfall; NASA EONET natural events; USGS Earthquake Catalog; Esri World Imagery Wayback. Grid-cell values (~50 km) may differ' : 'ERA5 reanalysis (Copernicus/ECMWF) and CMIP6 HighResMIP via Open-Meteo; USGS Earthquake Catalog; CAMS air quality; Copernicus DEM; Esri World Imagery Wayback. Grid-cell values (~25 km) may differ'} from station records. Screening rules are simple thresholds and not an official assessment. Projections are scenario-based, not forecasts.</p>
   ${autoPrint ? '<script>addEventListener("load",()=>setTimeout(()=>print(),400))<\/script>' : ''}</body></html>`;
 }
 function openReport(rep, autoPrint){

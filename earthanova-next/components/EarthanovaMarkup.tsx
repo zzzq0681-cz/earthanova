@@ -241,7 +241,7 @@ export default function EarthanovaMarkup() {
               <ol className="sp-steps" id="spSteps">
                 <li data-k="era5">NASA POWER climate record 2019–2025 <small>MERRA-2</small></li>
                 <li data-k="cmip">NASA climate projections <small>not loaded yet</small></li>
-                <li data-k="hazard">Hazards &amp; elevation <small>not loaded yet</small></li>
+                <li data-k="hazard">Hazards <small>NASA EONET · USGS</small></li>
                 <li data-k="air">Air quality <small>not loaded yet</small></li>
                 <li data-k="img">Historical imagery <small>Esri Wayback</small></li>
               </ol>

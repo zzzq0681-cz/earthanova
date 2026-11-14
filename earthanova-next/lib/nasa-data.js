@@ -117,3 +117,45 @@ export function nasaBuildAnalysis(loc, radiusKm, bundle, img, period, hit, H) {
     nasa: { place: hit.place, distance_km: hit.distance_km, bundle, source: 'NASA POWER (MERRA-2 / CERES)' }
   };
 }
+
+
+/* ---------- NASA EONET (Earth Observatory Natural Event Tracker) ----------
+ * Open API, no key, CORS enabled. Used for volcanoes, wildfires, floods, severe storms, landslides.
+ * EONET only lists notable events (GDACS, IRWIN, NOAA NHC, JTWC, Smithsonian...), so "none found" is not proof of safety.
+ * It has no earthquake, drought, heat or dust events in its catalogue (checked 2019-2025). */
+const EONET_CATS = ['volcanoes', 'wildfires', 'floods', 'severeStorms', 'landslides'];
+export async function eonetEvents(lat, lon, radiusKm, period) {
+  if (isStatic()) return null;
+  const dLat = radiusKm / 111, dLon = radiusKm / (111 * Math.max(Math.cos(lat * Math.PI / 180), 0.2));
+  const c = (v, a, b) => Math.max(a, Math.min(b, v));
+  const bbox = [c(lon - dLon, -180, 180), c(lat + dLat, -90, 90), c(lon + dLon, -180, 180), c(lat - dLat, -90, 90)].map(v => v.toFixed(3)).join(',');
+  const url = `https://eonet.gsfc.nasa.gov/api/v3/events?category=${EONET_CATS.join(',')}&status=all&bbox=${bbox}` +
+    `&start=${period.start}-01-01&end=${period.end}-12-31&limit=1000`;
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 25000);
+  let j;
+  try {
+    const r = await fetch(url, { signal: ctl.signal });
+    if (!r.ok) throw new Error(`NASA EONET HTTP ${r.status}`);
+    j = await r.json();
+  } finally { clearTimeout(t); }
+  const byCat = Object.fromEntries(EONET_CATS.map(k => [k, []]));
+  for (const e of j.events || []) {
+    const cat = e.categories?.[0]?.id;
+    if (!byCat[cat]) continue;
+    let best = null;
+    for (const g of e.geometry || []) {
+      if (g.type !== 'Point') continue;
+      const d = hav(lat, lon, g.coordinates[1], g.coordinates[0]);
+      if (d <= radiusKm && (!best || d < best.d)) best = { d, g };
+    }
+    if (!best) continue;
+    const mag = best.g.magnitudeValue != null ? `${best.g.magnitudeValue} ${best.g.magnitudeUnit || ''}`.trim() : null;
+    byCat[cat].push({
+      title: e.title, date: (best.g.date || '').slice(0, 10), dist: Math.round(best.d), mag,
+      magValue: best.g.magnitudeValue, magUnit: best.g.magnitudeUnit,
+      url: e.sources?.[0]?.url || e.link, src: e.sources?.map(x => x.id).join('/') || 'EONET'
+    });
+  }
+  for (const k of EONET_CATS) byCat[k].sort((a, b) => b.date.localeCompare(a.date));
+  return { byCat, truncated: (j.events || []).length >= 1000, fetchedAt: Date.now() };
+}
