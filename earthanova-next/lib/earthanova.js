@@ -977,7 +977,7 @@ $('#presets').addEventListener('click', e => { const b = e.target.closest('butto
 const findLoc = id => [S.loc, ...PRESETS, ...favs(), ...recents()].find(x => x && x.id === id);
 
 /* ---------- pages ---------- */
-const PAGE_LABEL = {dashboard:'the dashboard', projects:'Projects', risk:'Risk Monitoring', tracking:'Hazard Tracking', compare:'Compare places', reports:'Reports', plans:'Plans', profile:'your profile'};
+const PAGE_LABEL = {dashboard:'the dashboard', projects:'Projects', risk:'Risk Monitoring', compare:'Compare places', reports:'Reports', plans:'Plans', profile:'your profile'};
 function setPage(p){
   S.page = p; document.body.dataset.page = p;
   $$('.topnav [data-nav]').forEach(b => b.toggleAttribute('aria-current', b.dataset.nav === p));
@@ -1000,7 +1000,7 @@ function go(p){
     toast('Pick a region on the globe and press Scan Area first.'); goHome(); return;
   }
   S.riskTok++; setPage(p);
-  if(p === 'projects') renderProjects(); else if(p === 'risk') renderRisk(); else if(p === 'reports') renderReports(); else if(p === 'tracking') renderTracking(); else if(p === 'compare') renderCompare(); else if(p === 'plans') renderPlans(); else if(p === 'profile') renderProfile();
+  if(p === 'projects') renderProjects(); else if(p === 'risk') renderRisk(); else if(p === 'reports') renderReports(); else if(p === 'compare') renderCompare(); else if(p === 'plans') renderPlans(); else if(p === 'profile') renderProfile();
 }
 
 /* ---------- flow ---------- */
@@ -1277,14 +1277,14 @@ $('#dlg').addEventListener('mousedown', e => { if(e.target.id === 'dlg') closeDi
 /* ---------- plans & subscription ---------- */
 const PRICE_PRO = '$12';
 const PLANS = {
-  basic:{id:'basic', name:'Basic', price:'Free', per:'', blurb:'For curious people, students and first projects.', limits:{projects:3, reports:3, tracked:1},
-    feats:['Scan any place for any study period', 'Basic and Playful dashboards', 'Advanced analysis: free for 30 days with a trial', 'Risk Monitoring towers', 'Compare places before you travel', 'Up to 3 projects and 3 saved reports', 'Track 1 region with Hazard Tracking']},
-  pro:{id:'pro', name:'Pro', price:PRICE_PRO, per:'/ month', blurb:'For researchers, developers and working professionals.', limits:{projects:50, reports:50, tracked:10},
-    feats:['Everything in Basic', 'Advanced analysis dashboard (full statistics, model ensemble, exports)', 'Up to 50 projects', 'Up to 50 saved reports', 'Track up to 10 regions with Hazard Tracking']},
-  org:{id:'org', name:'Organization', price:'Custom', per:'', contact:true, blurb:'For teams, institutes and companies.', limits:{projects:Infinity, reports:Infinity, tracked:Infinity},
-    feats:['Everything in Pro', 'Unlimited projects, reports and tracked regions', 'Onboarding for your team', 'Plan set up and managed by our team: contact sales']}
+  basic:{id:'basic', name:'Basic', price:'Free', per:'', blurb:'For curious people, students and first projects.', limits:{projects:3, reports:3},
+    feats:['Scan any place for any study period', 'Basic and Playful dashboards', 'Advanced analysis: free for 30 days with a trial', 'Risk Monitoring towers', 'Compare places before you travel', 'Up to 3 projects and 3 saved reports']},
+  pro:{id:'pro', name:'Pro', price:PRICE_PRO, per:'/ month', blurb:'For researchers, developers and working professionals.', limits:{projects:50, reports:50},
+    feats:['Everything in Basic', 'Advanced analysis dashboard (full statistics, model ensemble, exports)', 'Up to 50 projects', 'Up to 50 saved reports']},
+  org:{id:'org', name:'Organization', price:'Custom', per:'', contact:true, blurb:'For teams, institutes and companies.', limits:{projects:Infinity, reports:Infinity},
+    feats:['Everything in Pro', 'Unlimited projects and saved reports', 'Onboarding for your team', 'Plan set up and managed by our team: contact sales']}
 };
-const LIMIT_LABEL = {projects:'projects', reports:'saved reports', tracked:'tracked regions'};
+const LIMIT_LABEL = {projects:'projects', reports:'saved reports'};
 const lim = v => v === Infinity ? 'Unlimited' : v;
 const subOf = () => store.get(uKey('sub'), null) || {plan:'basic', status:'active', since:S.user?.created || Date.now(), renews:null, history:[{at:Date.now(), plan:'basic', note:'Account created on the Basic plan'}]};
 /* free trial: every account can start one 30-day trial of Pro (demo only, nothing is charged). It unlocks Advanced analysis and Pro limits. */
@@ -1344,8 +1344,7 @@ function renderPlanChip(){
     : `<button class="up-trial-btn" data-act="trial-start">${ic('star')}Start your free trial</button><p class="up-trial-note">30 days of Advanced analysis and Pro limits. No card needed.</p>`;
   applyLocks();
 }
-const trackList = () => store.get(uKey('track'), []);
-const usage = () => ({projects:favs().length, reports:reportsOf().length, tracked:trackList().length});
+const usage = () => ({projects:favs().length, reports:reportsOf().length});
 const canAdd = kind => usage()[kind] < planOf().limits[kind];
 function upsell(kind){
   const p = planOf();
@@ -1379,7 +1378,7 @@ function renderPlans(){
     <p class="muted foot">Prototype note: billing is simulated in this demo. No card is charged and no payment details are collected.</p></div>`;
 }
 function proDialog(){
-  showDialog({title:'Upgrade to Pro', body:`<p>Pro is ${PRICE_PRO} per month and includes up to 50 projects, 50 saved reports and 10 tracked regions.</p><p class="muted">Demo billing: nothing is charged in this prototype. Activating Pro starts a 30-day subscription period you can track in your profile.</p>`,
+  showDialog({title:'Upgrade to Pro', body:`<p>Pro is ${PRICE_PRO} per month and includes up to 50 projects and 50 saved reports.</p><p class="muted">Demo billing: nothing is charged in this prototype. Activating Pro starts a 30-day subscription period you can track in your profile.</p>`,
     actions:[{label:'Cancel'}, {label:'Activate Pro', cls:'btn-primary', fn:() => { setPlan('pro', `Upgraded to Pro (${PRICE_PRO}/month)`); toast('You are now on Pro.'); rerenderAccountPages(); }}]});
 }
 function orgDialog(){
@@ -1449,17 +1448,17 @@ async function savePassword(){
 }
 function exportData(){
   const u = allUsers().find(x => x.id === S.user.id), {salt, hash, ...pub} = u;
-  const data = {profile:pub, subscription:subOf(), projects:favs(), recent:recents(), reports:reportsOf(), tracked:trackList(), organizationRequest:orgReq()};
+  const data = {profile:pub, subscription:subOf(), projects:favs(), recent:recents(), reports:reportsOf(), organizationRequest:orgReq()};
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], {type:'application/json'})); a.download = 'earthanova-my-data.json'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 function deleteAccount(){
-  showDialog({title:'Delete your account?', body:'<p>This removes your profile, projects, reports, tracked regions and subscription from this browser. It cannot be undone.</p>', actions:[{label:'Keep my account'}, {label:'Delete everything', cls:'btn-primary danger-btn', fn:() => {
+  showDialog({title:'Delete your account?', body:'<p>This removes your profile, projects, reports and subscription from this browser. It cannot be undone.</p>', actions:[{label:'Keep my account'}, {label:'Delete everything', cls:'btn-primary danger-btn', fn:() => {
     const id = S.user.id; if(RP.tok) acctApi('DELETE', '/account', null).catch(() => {}); store.set('es:users', allUsers().filter(x => x.id !== id));
     Object.keys(localStorage).filter(k => k.endsWith(':' + id)).forEach(k => localStorage.removeItem(k)); logout(); toast('Your account was deleted.');
   }}]});
 }
 
-/* ---------- place picker (used by tracking and compare) ---------- */
+/* ---------- place picker (used by compare) ---------- */
 function placePicker(inp, list, onPick){
   let t, seq = 0, items = [];
   inp.addEventListener('input', () => {
@@ -1478,108 +1477,6 @@ function placePicker(inp, list, onPick){
   inp.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); const li = list.querySelector('li[data-i]'); if(li && !list.hidden) li.dispatchEvent(new MouseEvent('mousedown', {bubbles:true})); } });
 }
 const knownPlaces = () => { const seen = new Set(); return [...(S.A ? [S.A.loc] : []), ...favs(), ...PRESETS].filter(p => !seen.has(p.id) && seen.add(p.id)); };
-
-/* ---------- hazard tracking ---------- */
-const TRACK = [
-  {id:'quake', code:'K-01', name:'Seismic Watch', hazard:'Earthquakes', icon:'quake'},
-  {id:'volcano', code:'K-02', name:'Volcano Watch', hazard:'Volcanoes', icon:'flame'},
-  {id:'storm', code:'K-03', name:'Storm Watch', hazard:'Severe storms', icon:'wind'},
-  {id:'flood', code:'K-04', name:'Flood & Landslide Watch', hazard:'Floods & landslides', icon:'drop'},
-  {id:'dust', code:'K-05', name:'Dust Watch', hazard:'Windblown dust', icon:'cloud'},
-  {id:'sea', code:'K-06', name:'Sea-Level Watch', hazard:'Sea-level rise', icon:'waves'}
-];
-const T = {sel:null, tower:0, data:{}, tok:0};
-const TRK_DAYS = 30, TRK_KM = 300;
-const trkLoading = (m = 'Loading NASA data…') => ({level:'scanning', score:0, headline:m, explain:'Dust and sea level come from NASA archives. The first scan of a new place can take 1-2 minutes, then it is stored.', metrics:[], series:null, items:[]});
-function trackReadings(eq, eo){
-  const R = {}, none = (m, why = 'This source could not be reached. Try Refresh in a moment.') => ({level:'na', score:0, headline:m, explain:why, metrics:[], series:null, items:[]});
-  const mk = (level, score, headline, explain, metrics, items = []) => ({level, score:Math.round(clamp(score)), headline, explain, metrics, series:null, items});
-  if(eq?.features){
-    const f = eq.features, mq = f.length ? Math.max(...f.map(q => q.properties.mag)) : null;
-    R.quake = mk(mq >= 6 ? 'high' : mq >= 4.5 ? 'moderate' : 'low', ((mq || 3) - 3) / 3 * 100, f.length ? `${f.length} quakes of M3+ in ${TRK_DAYS} days, largest M${mq.toFixed(1)}` : `No M3+ earthquakes in the last ${TRK_DAYS} days`, `Counts USGS earthquakes within ${TRK_KM} km. Moderate when the largest is M4.5 or more, high at M6 or more.`, [['Events M3+', f.length], ['Largest', mq != null ? 'M' + mq.toFixed(1) : '—'], ['Radius', TRK_KM + ' km']],
-      f.slice(0, 5).map(q => ({title:`M${q.properties.mag.toFixed(1)} · ${q.properties.place || 'Unknown'}`, meta:new Date(q.properties.time).toISOString().slice(0, 10), url:q.properties.url, tag:'USGS'})));
-  } else R.quake = none('USGS unavailable');
-  const note = 'NASA EONET lists notable events only (GDACS, NOAA, JTWC, Smithsonian and others), so "none listed" is not proof of safety.';
-  const ev = (key, lists, label, code) => {
-    if(!eo){ R[key] = none('NASA EONET unavailable'); return; }
-    const all = lists.flatMap(k => eo.byCat[k] || []).sort((x, y) => y.date.localeCompare(x.date)), n = all.length;
-    R[key] = mk(n >= 3 ? 'high' : n >= 1 ? 'moderate' : 'low', n / 3 * 100, n ? `${n} ${label} event${n > 1 ? 's' : ''} in ${TRK_DAYS} days` : `No ${label} events listed in ${TRK_DAYS} days`, `NASA EONET events within ${TRK_KM} km over the last ${TRK_DAYS} days. Moderate at 1 event, high at 3 or more. ${note}`, [['Events', n], ['Radius', TRK_KM + ' km'], ['Window', TRK_DAYS + ' days']], all.slice(0, 6).map(e => ({title:e.title, meta:`${e.date} · ${e.dist} km away${e.mag ? ' · ' + e.mag : ''}`, url:e.url, tag:'NASA EONET'})));
-  };
-  ev('volcano', ['volcanoes'], 'volcano'); ev('storm', ['severeStorms'], 'severe storm'); ev('flood', ['floods', 'landslides'], 'flood or landslide');
-  R.dust = trkLoading(); R.sea = trkLoading();
-  return R;
-}
-async function fetchTrack(l, force, onUpdate){
-  const c = T.data[l.id]; if(c && !force && Date.now() - c.at < 9e5) return c;
-  const q = `latitude=${l.lat}&longitude=${l.lon}`, now = Date.now(), since = new Date(now - TRK_DAYS*864e5).toISOString().slice(0, 10), today = new Date(now).toISOString().slice(0, 10);
-  const [eq, eo] = await Promise.allSettled([
-    getJSON(`https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&${q}&maxradiuskm=${TRK_KM}&starttime=${since}&minmagnitude=3&orderby=magnitude&limit=100`, 15000),
-    eonetEvents(l.lat, l.lon, TRK_KM, {startDate:since, endDate:today})
-  ]);
-  const d = {at:now, R:trackReadings(eq.value, eo.value)}; T.data[l.id] = d;
-  /* dust and sea level are slow the first time (server fetches NASA archives), so they fill in afterwards */
-  (async () => {
-    try{
-      const hit = await nasaEnsure(l.lat, l.lon, l.short || l.name), hz = await nasaHazards(hit.place.name);
-      Object.assign(d.R, dustSeaTowers(hz.dust, hz.sea, ''));
-    }catch(e){
-      const m = (e && e.message) || 'unavailable';
-      d.R.dust = {level:'na', score:0, headline:'NASA dust data unavailable', explain:`The NASA server could not load this series (${m}). Try Refresh later.`, metrics:[], series:null, items:[]};
-      d.R.sea = {...d.R.dust, headline:'NASA sea-level data unavailable'};
-    }
-    ['dust', 'sea'].forEach(k => { d.R[k].series = null; });
-    if(onUpdate) onUpdate();
-  })();
-  return d;
-}
-function addTracked(l){
-  const list = trackList(); if(list.some(x => x.id === l.id)){ toast(`${l.short || l.name} is already tracked.`); return false; }
-  if(!canAdd('tracked')){ upsell('tracked'); return false; }
-  list.push({id:l.id, name:l.name, short:l.short || l.name, lat:l.lat, lon:l.lon}); store.set(uKey('track'), list); return true;
-}
-function removeTracked(id){ store.set(uKey('track'), trackList().filter(x => x.id !== id)); if(T.sel === id) T.sel = null; }
-const trkLevels = id => { const d = T.data[id]; return d ? TRACK.map(t => d.R[t.id].level) : TRACK.map(() => 'scanning'); };
-async function renderTracking(force){
-  const list = trackList(), tok = ++T.tok;
-  $('#trkEmpty').hidden = list.length > 0; $('#trkBody').hidden = !list.length;
-  $('#trkChips').innerHTML = list.map(r => `<span class="chip-reg"><button role="tab" data-trk-sel="${esc(r.id)}" aria-selected="${r.id === T.sel}">${ic('pin')}${esc(r.short)}</button><button class="x" data-trk-del="${esc(r.id)}" aria-label="Stop tracking ${esc(r.short)}">${ic('close')}</button></span>`).join('');
-  if(!list.length){
-    $('#trkEmpty').innerHTML = `${ic('pulse')}<h3>No regions tracked yet</h3><p>Add a region above and its six hazard towers will start watching it. Try one of these:</p><div class="chips">${PRESETS.slice(0, 5).map(p => `<button class="chip-opt" data-act="trk-add-id" data-id="${esc(p.id)}">${esc(p.short)}</button>`).join('')}</div>`;
-    return;
-  }
-  if(!list.some(r => r.id === T.sel)) T.sel = list[0].id;
-  $('#trkChips').querySelectorAll('[data-trk-sel]').forEach(b => b.setAttribute('aria-selected', b.dataset.trkSel === T.sel));
-  drawTrackStage(); renderTrackMatrix(list);
-  await Promise.all(list.map(async r => { try{ await fetchTrack(r, force, () => { if(tok === T.tok){ renderTrackMatrix(list); if(r.id === T.sel) drawTrackStage(); } }); }catch{} if(tok !== T.tok) return; renderTrackMatrix(list); if(r.id === T.sel) drawTrackStage(); }));
-  if(tok === T.tok){ const t0 = Math.min(...list.map(r => T.data[r.id]?.at || Date.now())); $('#trkSub').textContent = `Watching ${list.length} region${list.length > 1 ? 's' : ''}. Earthquakes, volcanoes, storms, floods and landslides: last 30 days. Dust and sea level: NASA long-term records. Updated ${ago(t0)}.`; }
-}
-function renderTrackMatrix(list){
-  $('#trkMatrix').innerHTML = `<table class="tbl mx"><thead><tr><th>Region</th>${TRACK.map(t => `<th title="${t.name}">${ic(t.icon)}<span class="mx-n">${t.hazard}</span></th>`).join('')}</tr></thead><tbody>${list.map(r => { const d = T.data[r.id]; return `<tr class="${r.id === T.sel ? 'sel' : ''}"><td><button class="link-btn" data-trk-sel="${esc(r.id)}">${esc(r.short)}</button></td>${TRACK.map((t, i) => { const lv = d ? d.R[t.id].level : 'scanning'; return `<td><button class="mx-c" data-trk-sel="${esc(r.id)}" data-trk-tower="${i}"><span class="lvl lvl-${lv}">${LEVEL[lv][0]}</span></button></td>`; }).join('')}</tr>`; }).join('')}</tbody></table>`;
-}
-function drawTrackStage(){
-  const r = trackList().find(x => x.id === T.sel); if(!r) return;
-  const lv = trkLevels(r.id); drawTowers($('#trkSvg'), TRACK, lv, 'k', pickTrackTower, T.tower);
-  $('#trkRegion').textContent = r.name;
-  const n = k => lv.filter(l => l === k).length;
-  $('#trkCounts').innerHTML = `<span class="lvl lvl-high">${n('high')} high</span><span class="lvl lvl-moderate">${n('moderate')} moderate</span><span class="lvl lvl-low">${n('low')} low</span>`;
-  $('#trkTowers').innerHTML = TRACK.map((t, i) => `<li><button class="tw-row" data-i="${i}" data-trk-tower="${i}" aria-pressed="${i === T.tower}"><span class="tw-ic" style="color:${LEVEL[lv[i]][1]}">${ic(t.icon)}</span><span class="tw-t"><b>${t.name}</b><small>${t.hazard}</small></span><span class="lvl lvl-${lv[i]}">${LEVEL[lv[i]][0]}</span></button></li>`).join('');
-  renderTrackDetail();
-}
-function pickTrackTower(i){ T.tower = i; drawTrackStage(); }
-function renderTrackDetail(){
-  const r = trackList().find(x => x.id === T.sel), d = r && T.data[r.id], el = $('#trkDetail');
-  if(!d){ el.innerHTML = '<p class="td-exp">Loading live data…</p>'; return; }
-  const t = TRACK[T.tower], x = d.R[t.id], lv = LEVEL[x.level];
-  const bars = x.series ? `<div class="bars" role="img" aria-label="Daily values">${x.series.pts.map(p => { const pc = p.v == null ? 0 : clamp((p.v - x.series.lo) / ((x.series.hi - x.series.lo) || 1) * 100, 4); return `<div class="bar"><span class="bv">${p.v == null ? '—' : (+p.v).toFixed(x.series.dec)}</span><i style="height:${pc}%;background:${lv[1]}"></i><span class="bl">${p.l}</span></div>`; }).join('')}</div><p class="bars-u">Unit: ${x.series.unit}</p>` : '';
-  el.innerHTML = `<header><span class="td-ic" style="color:${lv[1]}">${ic(t.icon)}</span><div><p class="td-code">${t.code} · ${t.hazard} · ${esc(r.short)}</p><h3>${t.name}</h3></div><span class="lvl lvl-${x.level}">${lv[0]}</span></header>
-    <div class="meter" role="img" aria-label="Threat score ${x.score} out of 100"><span style="width:${x.score}%;background:${lv[1]}"></span></div><p class="td-head">${esc(x.headline)}</p><p class="td-exp">${esc(x.explain)}</p>${bars}
-    ${x.metrics.length ? `<div class="kv">${x.metrics.map(m => `<div><span>${esc(m[0])}</span><b>${esc(m[1])}</b></div>`).join('')}</div>` : ''}
-    ${x.items.length ? `<h4>Latest events</h4><ul class="list">${x.items.map(e => `<li><div class="grow"><b>${esc(e.title)}</b><span>${esc(e.meta)}</span></div>${e.url ? `<a class="link-btn" href="${esc(e.url)}" target="_blank" rel="noopener">USGS</a>` : ''}</li>`).join('')}</ul>` : ''}
-    <p class="td-src">Sources: USGS earthquakes, NASA EONET events, NASA MERRA-2 dust, NASA-SSH sea level. Updated ${ago(d.at)}. Screening only, not an official warning.</p>`;
-}
-function initTrackingPage(){
-  placePicker($('#trkInput'), $('#trkResults'), (l, inp) => { inp.value = ''; if(addTracked(l)){ T.sel = l.id; toast(`Now tracking ${l.short}.`); renderTracking(); } });
-}
 
 /* ---------- compare places (travel advisor) ---------- */
 const CMP = {from:null, to:null, start:null, end:null, pref:'mild', purpose:'trip', res:null};
@@ -1697,7 +1594,7 @@ function showCompare(r){
     <div class="cmp-cards">${sc(a, sa)}${sc(b, sb)}</div>
     <div class="card"><div class="tbl-scroll"><table class="tbl cmp-tbl"><thead><tr><th></th><th>${esc(a.loc.short)} <small>(from)</small></th><th>${esc(b.loc.short)} <small>(to)</small></th></tr></thead><tbody>${rows}</tbody></table></div><p class="muted">Climate values are averages for the same dates over ${LAST_YEAR - 4}–${LAST_YEAR} (NASA POWER daily; rain from NASA GPM IMERG when the place is stored, otherwise POWER), so they describe what is typical, not a forecast${a.fcast || b.fcast ? ' (the short forecast shown is from Open-Meteo, not NASA)' : ''}. Dust is the natural part of airborne particles from NASA MERRA-2; earthquakes are from USGS. A check mark means clearly better.</p></div>
     <div class="cmp-notes">${v.flags.length ? `<section class="card"><h3>${ic('alert')}Watch out</h3><ul class="notes">${li(v.flags, 'alert', 'bad')}</ul></section>` : ''}${(v.pros.length || v.cons.length) ? `<section class="card"><h3>${ic('compare')}Why</h3><ul class="notes">${li(v.pros, 'check', 'good')}${li(v.cons, 'alert', 'bad')}</ul></section>` : ''}${v.tips.length ? `<section class="card"><h3>${ic('bulb')}Tips for ${esc(b.loc.short)}</h3><ul class="notes">${li(v.tips, 'bulb', '')}</ul></section>` : ''}</div>
-    <div class="btn-row"><button class="btn-primary" data-act="cmp-open">${ic('scan')}Open ${esc(b.loc.short)} dashboard</button><button class="btn-secondary" data-act="cmp-track">${ic('pulse')}Track ${esc(b.loc.short)} hazards</button></div>
+    <div class="btn-row"><button class="btn-primary" data-act="cmp-open">${ic('scan')}Open ${esc(b.loc.short)} dashboard</button></div>
     <div class="pl-root" id="cmpPlan"></div>
     <p class="muted foot">This is general guidance from open climate data, not a safety guarantee. Always check official travel advisories, visa rules and current local conditions before you decide.</p>`;
   loadPlanner(r);
@@ -1760,9 +1657,6 @@ document.addEventListener('click', e => {
   const nl = t.closest('[data-nav-link]'); if(nl){ go(nl.dataset.navLink); return; }
   const sv = t.closest('[data-setview]'); if(sv){ const v = sv.dataset.setview; if(v === 'advanced' && !hasAdvanced() && S.page !== 'dashboard'){ trialDialog(); return; } setView(v); return; }
   if(!t.closest('#userMenu')) closeUserPop();
-  const ts = t.closest('[data-trk-sel]'); if(ts){ T.sel = ts.dataset.trkSel; if(ts.dataset.trkTower != null) T.tower = +ts.dataset.trkTower; $$('#trkChips [data-trk-sel]').forEach(x => x.setAttribute('aria-selected', x.dataset.trkSel === T.sel)); drawTrackStage(); renderTrackMatrix(trackList()); return; }
-  const tt = t.closest('#trkTowers [data-trk-tower]'); if(tt){ pickTrackTower(+tt.dataset.trkTower); return; }
-  const td = t.closest('[data-trk-del]'); if(td){ removeTracked(td.dataset.trkDel); renderTracking(); return; }
   const ps = t.closest('[data-pl-sel]'); if(ps){ PL.sel = ps.dataset.plSel; if(CMP.res) loadPlanner(CMP.res); return; }
   const cp = t.closest('[data-cmp-pick]'); if(cp){ const l = findLoc(cp.dataset.id) || knownPlaces().find(x => x.id === cp.dataset.id); if(l){ CMP[cp.dataset.cmpPick] = l; CMP.res = null; $(cp.dataset.cmpPick === 'from' ? '#cmpFrom' : '#cmpTo').value = l.name; } return; }
   const pr = t.closest('[data-prole]'); if(pr){ PF.role = pr.dataset.prole; $$('[data-prole]').forEach(x => x.setAttribute('aria-pressed', x === pr)); return; }
@@ -1785,17 +1679,13 @@ document.addEventListener('click', e => {
   else if(act === 'plan-pro') proDialog();
   else if(act === 'trial-start') startTrial();
   else if(act === 'plan-org') orgDialog();
-  else if(act === 'plan-basic') showDialog({title:'Switch to Basic?', body:'<p>Basic includes 3 projects, 3 saved reports and 1 tracked region. Items you already have are kept, but you will not be able to add more until you are under the limits.</p>', actions:[{label:'Stay on my plan'}, {label:'Switch to Basic', cls:'btn-primary', fn:() => { setPlan('basic', 'Switched to Basic'); toast('You are on the Basic plan.'); rerenderAccountPages(); }}]});
+  else if(act === 'plan-basic') showDialog({title:'Switch to Basic?', body:'<p>Basic includes 3 projects and 3 saved reports. Items you already have are kept, but you will not be able to add more until you are under the limits.</p>', actions:[{label:'Stay on my plan'}, {label:'Switch to Basic', cls:'btn-primary', fn:() => { setPlan('basic', 'Switched to Basic'); toast('You are on the Basic plan.'); rerenderAccountPages(); }}]});
   else if(act === 'plan-cancel') showDialog({title:'Cancel Pro?', body:'<p>You will move to the Basic plan right away. Your data is kept, but Basic has lower limits.</p>', actions:[{label:'Keep Pro'}, {label:'Cancel Pro', cls:'btn-primary', fn:() => { setPlan('basic', 'Pro cancelled'); toast('Pro cancelled. You are on Basic.'); rerenderAccountPages(); }}]});
   else if(act === 'export-data') exportData();
   else if(act === 'logout') logout();
   else if(act === 'delete-account') deleteAccount();
-  else if(act === 'trk-add-current'){ const l = S.A ? S.A.loc : S.loc; if(addTracked(l)){ T.sel = l.id; toast(`Now tracking ${l.short}.`); renderTracking(); } }
-  else if(act === 'trk-add-projects'){ let n = 0; for(const f of favs()){ if(trackList().some(x => x.id === f.id)) continue; if(!addTracked(f)) break; n++; } if(n) toast(`Added ${n} project${n > 1 ? 's' : ''} to tracking.`); renderTracking(); }
-  else if(act === 'trk-add-id'){ const l = findLoc(id); if(l && addTracked(l)){ T.sel = l.id; renderTracking(); } }
   else if(act === 'cmp-swap'){ [CMP.from, CMP.to] = [CMP.to, CMP.from]; CMP.res = null; renderCompare(); }
   else if(act === 'cmp-open'){ if(CMP.res){ S.loc = withId(CMP.res.b.loc); S.goto = null; scan(); } }
-  else if(act === 'cmp-track'){ if(CMP.res && addTracked(CMP.res.b.loc)){ T.sel = CMP.res.b.loc.id; toast(`Now tracking ${CMP.res.b.loc.short}.`); go('tracking'); } }
   else if(act.startsWith('report-')){
     const m = reportsOf().find(x => x.id === id); if(!m) return;
     if(act === 'report-del'){
@@ -1817,9 +1707,7 @@ document.addEventListener('submit', e => {
   if(f === 'profileForm'){ e.preventDefault(); saveProfile(); }
   else if(f === 'pwForm'){ e.preventDefault(); savePassword(); }
   else if(f === 'cmpForm'){ e.preventDefault(); runCompare(); }
-  else if(f === 'trkForm') e.preventDefault();
 });
-$('#trkRefresh').addEventListener('click', () => renderTracking(true));
 ['#pStart', '#pEnd', '#dStart', '#dEnd'].forEach(i => $(i).addEventListener('change', e => fixPeriod(e.target)));
 $('#dRad').addEventListener('change', () => { $('#radius').value = $('#dRad').value; });
 $('#rescanBtn').addEventListener('click', () => { $('#radius').value = $('#dRad').value; scan(true); });
@@ -1846,7 +1734,7 @@ $('#favBtn').addEventListener('click', () => { if(!isFav(S.loc) && !canAdd('proj
 document.addEventListener('keydown', e => { if(e.key === 'Escape'){ closeUserPop(); if(!$('#dlg').hidden) closeDialog(); if(S.page === 'home' && S.state === 'selected' && $('#auth').hidden) goIdle(); } });
 
 /* ---------- boot ---------- */
-wireAuth(); initPeriodControls(); initTrackingPage();
+wireAuth(); initPeriodControls();
 const sessionId = store.get('es:session', null), sessionUser = sessionId && allUsers().find(u => u.id === sessionId);
 if(sessionUser) setUser(sessionUser);
 initGlobe();

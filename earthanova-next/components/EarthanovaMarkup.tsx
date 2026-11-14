@@ -74,7 +74,6 @@ export default function EarthanovaMarkup() {
             {" "}
             <button data-nav="risk" title="Risk Monitoring"><i data-ic="radar" /><span className="lbl">Risk</span></button>
             {" "}
-            <button data-nav="tracking" title="Hazard Tracking"><i data-ic="pulse" /><span className="lbl">Tracking</span></button>
             {" "}
             <button data-nav="compare" title="Compare places"><i data-ic="compare" /><span className="lbl">Compare</span></button>
             {" "}
@@ -563,57 +562,6 @@ export default function EarthanovaMarkup() {
                 <p>Pick a place on the globe and scan it. Each tower will then analyse its own hazard.</p>
                 <button className="btn-primary" data-act="go-home"><i data-ic="pin" />Pick a region</button>
               </div>
-            </div>
-          </section>
-          <section className="page" id="pageTracking" aria-label="Hazard Tracking">
-            <div className="page-in wide">
-              <header className="page-h">
-                <div>
-                  <h1><i data-ic="pulse" />Hazard Tracking</h1>
-                  <p id="trkSub">
-                    Watch the regions you care about. Each tower follows one natural hazard: earthquakes, volcanoes, storms, floods and landslides over the last 30 days, plus long-term dust and sea level from NASA.
-                  </p>
-                </div>
-                <div className="ph-actions">
-                  <button className="btn-ghost" id="trkRefresh"><i data-ic="refresh" />Refresh</button>
-                </div>
-              </header>
-              <div className="card trk-add">
-                <div className="trk-row">
-                  <form className="pick" id="trkForm" autoComplete="off">
-                    <i data-ic="search" />
-                    <label className="sr-only" htmlFor="trkInput">Add a region to track</label>
-                    <input id="trkInput" type="search" placeholder="Add a region to track…" />
-                    <ul className="pick-list" id="trkResults" hidden />
-                  </form>
-                  <button className="btn-secondary" data-act="trk-add-current"><i data-ic="pin" />Add current region</button>
-                  {" "}
-                  <button className="btn-secondary" data-act="trk-add-projects"><i data-ic="layers" />Add my projects</button>
-                </div>
-                <div className="chips trk-chips" id="trkChips" role="tablist" aria-label="Tracked regions" />
-              </div>
-              <div id="trkBody">
-                <div className="card">
-                  <div className="tbl-scroll" id="trkMatrix" />
-                </div>
-                <div className="risk" style={{ marginTop: "16px" }}>
-                  <div className="risk-scroll">
-                    <div className="risk-stage trk-stage">
-                      <svg className="risk-svg" id="trkSvg" viewBox="0 0 800 560" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Hazard watch towers for the selected region" />
-                    </div>
-                    <p className="risk-hint">Swipe sideways to see all six towers</p>
-                  </div>
-                  <aside className="risk-side">
-                    <div className="risk-sum">
-                      <p id="trkRegion">—</p>
-                      <div className="counts" id="trkCounts" />
-                    </div>
-                    <ul className="tower-list" id="trkTowers" />
-                    <div className="tower-detail" id="trkDetail" />
-                  </aside>
-                </div>
-              </div>
-              <div className="empty-state" id="trkEmpty" hidden />
             </div>
           </section>
           <section className="page" id="pageCompare" aria-label="Compare places" />
