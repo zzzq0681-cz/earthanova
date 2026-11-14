@@ -52,19 +52,7 @@ export default function EarthanovaMarkup() {
       <div className="app">
         <header className="topbar">
           <a className="brand" href="#" id="homeLink" aria-label="Earthanova — home">
-            <svg className="brand-logo" viewBox="0 0 48 48" aria-hidden="true">
-              <defs>
-                <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0" stopColor="#7ff0ff" />
-                  <stop offset="1" stopColor="#1aa6d6" />
-                </linearGradient>
-              </defs>
-              <circle cx="24" cy="24" r="21" fill="none" stroke="url(#lg)" strokeWidth="2.4" />
-              <path d="M24 3 A21 21 0 0 1 45 24" fill="none" stroke="#22D3EE" strokeWidth="4" strokeLinecap="round" filter="url(#glow)" />
-              <circle cx="24" cy="24" r="13" fill="none" stroke="url(#lg)" strokeWidth="2" />
-              <circle cx="24" cy="24" r="5" fill="#22D3EE" filter="url(#glow)" />
-              <path d="M24 24 L38 10" stroke="#EAF8FF" strokeWidth="2" strokeLinecap="round" />
-            </svg>
+            <img className="brand-logo" src="/logo.png" alt="" width={44} height={44} />
             <span><b>EARTHANOVA</b><small>Explore Earth. Understand change.</small></span>
           </a>
           <nav className="topnav" id="topnav" aria-label="Primary">
@@ -572,12 +560,7 @@ export default function EarthanovaMarkup() {
       </div>
       <div className="splash" id="splash" role="status" aria-live="polite">
         <div className="splash-inner">
-          <svg className="splash-logo" viewBox="0 0 48 48" aria-hidden="true">
-            <circle cx="24" cy="24" r="21" fill="none" stroke="#22D3EE" strokeWidth="2.4" />
-            <path d="M24 3 A21 21 0 0 1 45 24" fill="none" stroke="#7ff0ff" strokeWidth="4" strokeLinecap="round" filter="url(#glow)" />
-            <circle cx="24" cy="24" r="13" fill="none" stroke="#22D3EE" strokeWidth="2" />
-            <circle cx="24" cy="24" r="5" fill="#22D3EE" filter="url(#glow)" />
-          </svg>
+          <img className="splash-logo" src="/logo.png" alt="" width={96} height={96} />
           <p className="eyebrow">Open climate &amp; hazard data · any point on Earth</p>
           <h1>EARTHANOVA</h1>
           <p className="tagline">Explore Earth. Detect Change. Understand What Comes Next.</p>
