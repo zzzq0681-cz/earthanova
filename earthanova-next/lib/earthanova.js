@@ -5,7 +5,7 @@ import Globe from 'globe.gl';
 import {towerViz, renderChart as renderHzChart, wireCharts as wireHzCharts} from './hazard-charts.js';
 import {buildPlan, bestTimeHtml, riskCalendarHtml, eonetByMonth, wirePlanner} from './compare-planner.js';
 import {mlHtml, mlErrorHtml} from './compare-ml.js';
-import {eonetEvents, nasaHazards, nasaWindow, nasaClimateYear, nasaPredict, nasaFind, nasaEnsure, nasaLoad, nasaBuildAnalysis, isStatic, reportUrl} from './nasa-data.js';
+import {eonetEvents, nasaHazards, nasaWindow, nasaClimateYear, nasaPredict, apiBase, nasaFind, nasaEnsure, nasaLoad, nasaBuildAnalysis, isStatic, reportUrl} from './nasa-data.js';
 
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -334,12 +334,14 @@ async function verifyUser(email, password){
 function setUser(u){
   S.user = u ? publicUser(u) : null;
   store.set('es:session', u ? u.id : null);
+  RP.list = []; RP.full = {}; RP.err = ''; RP.tok = u ? store.get('es:tok:' + u.id, null) : null;
   document.body.classList.toggle('authed', !!u);
   if(u){
     const initials = u.name.trim().split(/\s+/).map(w => w[0]).slice(0,2).join('').toUpperCase() || 'EA';
     $('#userBtn').textContent = initials; $('#upName').textContent = u.name; $('#upEmail').textContent = u.email; $('#upRole').textContent = roleOf(u.role).label;
     let v0 = store.get(uKey('view'), null) || roleOf(u.role).view; if(v0 === 'advanced' && !hasAdvanced()) v0 = 'basic';
     setView(v0, false); renderPlanChip();
+    if(RP.tok) loadReports(); else RP.err = 'Log out and log in again once to connect your saved reports.';
   }
 }
 function setView(v, persist = true){
@@ -387,7 +389,7 @@ function wireAuth(){
   $('#loginForm').addEventListener('submit', async e => {
     e.preventDefault(); const err = $('#liErr'); err.textContent = '';
     if(!$('#liEmail').value.trim() || !$('#liPass').value){ err.textContent = 'Enter your email and password.'; return; }
-    try{ const u = await verifyUser($('#liEmail').value, $('#liPass').value); setUser(u); afterAuth(`Welcome back, ${u.name.split(' ')[0]}.`); }
+    try{ const pw = $('#liPass').value, u = await verifyUser($('#liEmail').value, pw); setUser(u); afterAuth(`Welcome back, ${u.name.split(' ')[0]}.`); acctSignIn(u.email, pw); }
     catch(ex){ err.textContent = ex.message; }
   });
   $('#regForm1').addEventListener('submit', e => {
@@ -407,7 +409,7 @@ function wireAuth(){
     if(!AU.role){ err.textContent = 'Pick the option that describes you best.'; return; }
     try{
       const u = await registerUser({...AU.d, role:AU.role, field:$('#rgField').value, interests:[...AU.interests], purpose:$('#rgPurpose').value});
-      setUser(u); AU.d = {};
+      setUser(u); acctSignIn(u.email, AU.d.password); AU.d = {};
       afterAuth('Account created on the Basic plan.'); setTimeout(() => offerTrial(u), 350);
     }catch(ex){ err.textContent = ex.message; AU.step = 1; showAuthPane(); $('#rg1Err').textContent = ex.message; }
   });
@@ -1107,7 +1109,59 @@ function renderProjects(){
 }
 
 /* ---------- reports ---------- */
-const reportsOf = () => store.get(uKey('reports'), []);
+/* Saved reports live in the server database (users.db), one set per account, so they follow the account across log out, log in and devices. */
+const RP = {list:[], tok:null, full:{}, err:''};
+const reportsOf = () => RP.list;
+async function sha256Key(text){
+  try{ const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)); return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2,'0')).join(''); }
+  catch{ /* plain-http pages have no crypto.subtle: tiny pure-JS SHA-256 */
+    const K = [], H = [], W = new Array(64), r = (x, n) => (x >>> n) | (x << (32 - n)); let pc = 0, c = 2;
+    for(; pc < 64; c++){ let ok = true; for(let d = 2; d * d <= c; d++) if(c % d === 0){ ok = false; break; } if(ok){ if(pc < 8) H[pc] = (Math.pow(c, .5) * 4294967296) | 0; K[pc++] = (Math.pow(c, 1/3) * 4294967296) | 0; } }
+    const bytes = [...unescape(encodeURIComponent(text))].map(ch => ch.charCodeAt(0)), L = bytes.length * 8; bytes.push(0x80); while(bytes.length % 64 !== 56) bytes.push(0);
+    for(let i = 7; i >= 0; i--) bytes.push(i > 3 ? 0 : (L >>> (i * 8)) & 255);
+    for(let o = 0; o < bytes.length; o += 64){
+      for(let i = 0; i < 16; i++) W[i] = (bytes[o+4*i] << 24) | (bytes[o+4*i+1] << 16) | (bytes[o+4*i+2] << 8) | bytes[o+4*i+3];
+      for(let i = 16; i < 64; i++){ const a = W[i-15], b = W[i-2]; W[i] = (W[i-16] + (r(a,7) ^ r(a,18) ^ (a >>> 3)) + W[i-7] + (r(b,17) ^ r(b,19) ^ (b >>> 10))) | 0; }
+      let [a,b,cc,d,e,f,g,h] = H;
+      for(let i = 0; i < 64; i++){ const t1 = (h + (r(e,6) ^ r(e,11) ^ r(e,25)) + ((e & f) ^ (~e & g)) + K[i] + W[i]) | 0, t2 = ((r(a,2) ^ r(a,13) ^ r(a,22)) + ((a & b) ^ (a & cc) ^ (b & cc))) | 0; h = g; g = f; f = e; e = (d + t1) | 0; d = cc; cc = b; b = a; a = (t1 + t2) | 0; }
+      [a,b,cc,d,e,f,g,h].forEach((v, i) => H[i] = (H[i] + v) | 0);
+    }
+    return H.map(x => (x >>> 0).toString(16).padStart(8, '0')).join('');
+  }
+}
+async function acctApi(method, path, body, tok = RP.tok){
+  const r = await fetch(apiBase() + path, {method, headers:{'Content-Type':'application/json', ...(tok ? {Authorization:'Bearer ' + tok} : {})}, body:body ? JSON.stringify(body) : undefined});
+  if(!r.ok){ const e = new Error(`HTTP ${r.status}`); e.status = r.status; throw e; }
+  return r.json();
+}
+/* called after a successful log in or registration (we have the password here, the server only ever gets a derived key) */
+async function acctSignIn(email, password){
+  try{
+    const key = await sha256Key(`es-sync:${email.trim().toLowerCase()}:${password}`);
+    const {token} = await acctApi('POST', '/account/session', {email, key}, null);
+    RP.tok = token; store.set(uKey('tok'), token);
+  }catch(e){ RP.err = 'The report database could not be reached, so saved reports are unavailable right now.'; }
+  await loadReports();
+}
+async function loadReports(){
+  const uid = S.user && S.user.id; if(!uid) return;
+  if(!RP.tok){ RP.list = []; rerenderAccountPages(); return; }
+  try{
+    let {reports} = await acctApi('GET', '/account/reports');
+    const local = store.get(uKey('reports'), []);   // older reports kept in this browser move into the database once
+    if(local.length){ for(const r of local) { try{ await acctApi('POST', '/account/reports', {report:r}); }catch{} } store.set(uKey('reports'), []); ({reports} = await acctApi('GET', '/account/reports')); }
+    if(!S.user || S.user.id !== uid) return;
+    RP.list = reports; RP.err = '';
+  }catch(e){
+    if(e.status === 401){ RP.tok = null; store.set(uKey('tok'), null); RP.err = 'Your session with the report database expired. Log out and log in again to see your saved reports.'; }
+    else RP.err = 'The report database could not be reached, so saved reports are unavailable right now.';
+  }
+  rerenderAccountPages();
+}
+async function fullReport(id){
+  if(RP.full[id]) return RP.full[id];
+  return RP.full[id] = await acctApi('GET', `/account/reports/${encodeURIComponent(id)}`);
+}
 const SECTIONS = [['summary','Summary and indicators'],['years','Yearly climate record'],['projection','Outlook projection'],['towers','Risk tower results'],['hazards','Earthquake list']];
 function renderReports(){
   const reps = reportsOf(), has = !!S.A;
@@ -1118,15 +1172,21 @@ function renderReports(){
       <fieldset><legend>Include</legend><div class="chips">${SECTIONS.map(s => `<label class="chk"><input type="checkbox" class="rp-sec" value="${s[0]}" checked><span>${s[1]}</span></label>`).join('')}</div></fieldset>
       <div class="btn-row"><button class="btn-primary" data-act="report-save">${ic('check')}Save report</button><button class="btn-secondary" data-act="report-save-pdf">${ic('print')}Save and download PDF</button></div></div>`
       : `<h2>${ic('plus')}New report</h2><p class="muted">Scan a region first. Your report is built from the scan results.</p><button class="btn-primary" data-act="go-home">${ic('pin')}Pick a region</button>`}</div>
+    ${RP.err ? `<p class="rep-err">${esc(RP.err)}</p>` : ''}
     <h2 class="sec-h">Saved reports (${reps.length})</h2>
     ${reps.length ? `<ul class="rep-list">${reps.map(r => `<li class="card rep-item"><span class="rep-ic">${ic('file')}</span><div class="grow"><b>${esc(r.title)}</b><span>${esc(r.loc.name)} · ${new Date(r.createdAt).toLocaleString()} · ${r.sections.length} section${r.sections.length === 1 ? '' : 's'}</span>${r.notes ? `<em>${esc(r.notes.slice(0, 140))}${r.notes.length > 140 ? '…' : ''}</em>` : ''}</div>
       <div class="rep-actions"><button class="btn-ghost" data-act="report-view" data-id="${r.id}">${ic('eye')}Preview</button><button class="btn-primary" data-act="report-pdf" data-id="${r.id}">${ic('print')}PDF</button><button class="btn-ghost" data-act="report-csv" data-id="${r.id}">${ic('download')}CSV</button><button class="icon-btn" data-act="report-del" data-id="${r.id}" aria-label="Delete report ${esc(r.title)}">${ic('trash')}</button></div></li>`).join('')}</ul>`
       : `<div class="empty-state">${ic('file')}<h3>No saved reports</h3><p>Reports you save will appear here so you can open them again later.</p></div>`}</div>`;
 }
-function saveReport(title, notes, sections){
+async function saveReport(title, notes, sections){
   if(!canAdd('reports')){ upsell('reports'); return null; }
-  const rep = {id:'r' + Date.now().toString(36), title:title || `${S.loc.short} report`, notes:notes || '', sections, createdAt:Date.now(), view:S.view, loc:S.A.loc, A:S.A};
-  try{ localStorage.setItem(uKey('reports'), JSON.stringify([rep, ...reportsOf()].slice(0, 25))); }catch{ toast('Storage is full. Delete an old report first.'); return null; }
+  if(!RP.tok){ toast(RP.err || 'Reports could not be saved: not connected to the report database.'); return null; }
+  const rep = {id:'r' + Date.now().toString(36) + Math.random().toString(36).slice(2,5), title:title || `${S.loc.short} report`, notes:notes || '', sections, createdAt:Date.now(), view:S.view, loc:S.A.loc, A:S.A};
+  try{ await acctApi('POST', '/account/reports', {report:rep}); }
+  catch(e){ toast(e.status === 413 ? 'This report is too large to save.' : e.status === 401 ? 'Your session expired. Log out and log in again, then save the report.' : 'Could not reach the report database. The report was not saved.'); return null; }
+  RP.full[rep.id] = rep;
+  const {A, ...meta} = rep; RP.list = [meta, ...RP.list];
+  rerenderAccountPages();
   return rep;
 }
 function csvText(A, loc){
@@ -1161,8 +1221,9 @@ function reportHTML(rep, autoPrint){
   <h2>Sources &amp; limitations</h2><p class="muted">${A.nasa ? 'NASA POWER (MERRA-2 / CERES) monthly data; NASA GPM IMERG V07 rainfall; NASA EONET events; NASA MERRA-2 dust; NASA-SSH sea level; USGS Earthquake Catalog; Esri World Imagery Wayback. Grid-cell values (~50 km) may differ' : 'ERA5 reanalysis (Copernicus/ECMWF) and CMIP6 HighResMIP via Open-Meteo; USGS Earthquake Catalog; CAMS air quality; Copernicus DEM; Esri World Imagery Wayback. Grid-cell values (~25 km) may differ'} from station records. Screening rules are simple thresholds and not an official assessment. Projections are scenario-based, not forecasts.</p>
   ${autoPrint ? '<script>addEventListener("load",()=>setTimeout(()=>print(),400))<\/script>' : ''}</body></html>`;
 }
-function openReport(rep, autoPrint){
-  const url = URL.createObjectURL(new Blob([reportHTML(rep, autoPrint)], {type:'text/html'})), w = window.open(url, '_blank');
+function openReport(rep, autoPrint, pre){
+  const url = URL.createObjectURL(new Blob([reportHTML(rep, autoPrint)], {type:'text/html'}));
+  let w = pre || window.open(url, '_blank'); if(pre && !pre.closed) pre.location.href = url; else if(pre) w = null;
   if(!w){ const a = document.createElement('a'); a.href = url; a.download = `earthanova-${slugOf(rep.loc.name)}.html`; a.click(); toast('Pop-up blocked. The report was downloaded instead (open it and use Print to save as PDF).'); }
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
@@ -1334,7 +1395,7 @@ function orgDialog(){
       toast('Request sent. Our team will contact you soon.'); rerenderAccountPages();
     }}]});
 }
-function rerenderAccountPages(){ renderPlanChip(); if(S.page === 'plans') renderPlans(); if(S.page === 'profile') renderProfile(); }
+function rerenderAccountPages(){ renderPlanChip(); if(S.page === 'reports') renderReports(); if(S.page === 'plans') renderPlans(); if(S.page === 'profile') renderProfile(); }
 
 /* ---------- profile ---------- */
 const PF = {role:null, interests:new Set()};
@@ -1393,7 +1454,7 @@ function exportData(){
 }
 function deleteAccount(){
   showDialog({title:'Delete your account?', body:'<p>This removes your profile, projects, reports, tracked regions and subscription from this browser. It cannot be undone.</p>', actions:[{label:'Keep my account'}, {label:'Delete everything', cls:'btn-primary danger-btn', fn:() => {
-    const id = S.user.id; store.set('es:users', allUsers().filter(x => x.id !== id));
+    const id = S.user.id; if(RP.tok) acctApi('DELETE', '/account', null).catch(() => {}); store.set('es:users', allUsers().filter(x => x.id !== id));
     Object.keys(localStorage).filter(k => k.endsWith(':' + id)).forEach(k => localStorage.removeItem(k)); logout(); toast('Your account was deleted.');
   }}]});
 }
@@ -1688,6 +1749,7 @@ async function loadPlanner(r){
 /* ---------- wiring ---------- */
 function goIdle(){ S.token++; setState('idle'); announce('Explore the globe, search, or click anywhere on Earth.'); }
 function logout(){
+  if(RP.tok){ const t = RP.tok; acctApi('POST', '/account/logout', null, t).catch(() => {}); if(S.user) store.set(uKey('tok'), null); }
   setUser(null); S.A = S.I = S.H = null; S.pending = null; S.riskTok++;
   closeUserPop(); renderPresets(); fillLocation(); if(world) world.labelsData(globeLabels());
   goHome(); setState('idle'); toast('You are logged out.');
@@ -1713,12 +1775,12 @@ document.addEventListener('click', e => {
   else if(act === 'go-home') goHome();
   else if(act === 'clear'){ Object.keys(localStorage).filter(k => k.startsWith(CACHE_VER)).forEach(k => localStorage.removeItem(k)); toast('Cached scans cleared.'); }
   else if(act === 'csv'){ if(S.A) downloadCSV(S.A, S.loc); else toast('Scan a location first.'); }
-  else if(act === 'report-quick'){ if(!S.A) return; const r = saveReport(`${S.loc.short} climate and hazard study`, '', SECTIONS.map(s => s[0])); if(r){ toast('Report saved. Find it in Reports.'); } }
+  else if(act === 'report-quick'){ if(!S.A) return; saveReport(`${S.loc.short} climate and hazard study`, '', SECTIONS.map(s => s[0])).then(r => { if(r) toast('Report saved to your account. Find it in Reports.'); }); }
   else if(act === 'report-save' || act === 'report-save-pdf'){
     const secs = $$('.rp-sec').filter(c => c.checked).map(c => c.value);
     if(!secs.length){ toast('Pick at least one section to include.'); return; }
-    const r = saveReport($('#rpTitle').value.trim(), $('#rpNotes').value.trim(), secs);
-    if(r){ renderReports(); toast('Report saved.'); if(act === 'report-save-pdf') openReport(r, true); }
+    const pre = act === 'report-save-pdf' ? window.open('', '_blank') : null;
+    saveReport($('#rpTitle').value.trim(), $('#rpNotes').value.trim(), secs).then(r => { if(r){ renderReports(); toast('Report saved to your account.'); if(pre) openReport(r, true, pre); } else if(pre) pre.close(); });
   }
   else if(act === 'plan-pro') proDialog();
   else if(act === 'trial-start') startTrial();
@@ -1735,11 +1797,15 @@ document.addEventListener('click', e => {
   else if(act === 'cmp-open'){ if(CMP.res){ S.loc = withId(CMP.res.b.loc); S.goto = null; scan(); } }
   else if(act === 'cmp-track'){ if(CMP.res && addTracked(CMP.res.b.loc)){ T.sel = CMP.res.b.loc.id; toast(`Now tracking ${CMP.res.b.loc.short}.`); go('tracking'); } }
   else if(act.startsWith('report-')){
-    const r = reportsOf().find(x => x.id === id); if(!r) return;
-    if(act === 'report-view') openReport(r, false);
-    else if(act === 'report-pdf') openReport(r, true);
-    else if(act === 'report-csv') downloadCSV(r.A, r.loc);
-    else if(act === 'report-del'){ store.set(uKey('reports'), reportsOf().filter(x => x.id !== id)); renderReports(); toast('Report deleted.'); }
+    const m = reportsOf().find(x => x.id === id); if(!m) return;
+    if(act === 'report-del'){
+      acctApi('DELETE', `/account/reports/${encodeURIComponent(id)}`).then(() => { RP.list = RP.list.filter(x => x.id !== id); delete RP.full[id]; renderReports(); rerenderAccountPages(); toast('Report deleted from your account.'); })
+        .catch(() => toast('Could not delete the report. Check your connection and try again.'));
+    }else{
+      const pre = act === 'report-csv' ? null : window.open('', '_blank');
+      fullReport(id).then(r => { if(act === 'report-csv') downloadCSV(r.A, r.loc); else openReport(r, act === 'report-pdf', pre); })
+        .catch(() => { if(pre) pre.close(); toast('Could not open the report from the database.'); });
+    }
   }
   else if(act === 'quiz-pick') quizPick(b.dataset.k, b);
   else if(act === 'quiz-next'){ Q.i++; Q.locked = false; renderQuiz(); }

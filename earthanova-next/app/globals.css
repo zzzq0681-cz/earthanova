@@ -1051,3 +1051,4 @@ body.adv-locked[data-view="advanced"] .cards>.card[data-views~="advanced"]:not([
 .trial-box.on{border-color:rgba(54,226,177,.5)}
 .trial-box.on>svg.ic{color:var(--mint)}
 .plan-cta{display:grid;gap:8px}
+.rep-err{margin:0 0 12px;padding:10px 14px;border-radius:10px;border:1px solid rgba(255,190,85,.5);background:rgba(255,190,85,.1);color:var(--amber);font-size:13px}
