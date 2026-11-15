@@ -81,32 +81,6 @@ export default function EarthanovaMarkup() {
               <span className="cta-t">Search / Scan a Region</span>
             </button>
             {" "}
-            <button className="btn-ghost" id="loginBtn"><i data-ic="user" /><span className="cta-t">Log in</span></button>
-            <div className="user" id="userMenu">
-              <button className="avatar" id="userBtn" aria-haspopup="true" aria-expanded="false" aria-label="Account menu">EA</button>
-              <div className="user-pop" id="userPop" role="menu" hidden>
-                <div className="up-head">
-                  <b id="upName">—</b>
-                  <span id="upEmail">—</span>
-                  <span className="tag cyan" id="upRole">—</span>
-                </div>
-                <div className="up-plan">
-                  <span className="tag mint" id="upPlan">Basic plan</span>
-                </div>
-                <div className="up-trial" id="upTrial" />
-                <div className="up-links">
-                  <button className="btn-ghost" data-nav="profile" role="menuitem"><i data-ic="user" />My profile</button>
-                  <button className="btn-ghost" data-nav="plans" role="menuitem"><i data-ic="star" />Plans &amp; subscription</button>
-                </div>
-                <p className="up-label">Default dashboard view</p>
-                <div className="seg seg-sm" id="upViews" role="group" aria-label="Default view">
-                  <button data-setview="basic">Basic</button>
-                  <button data-setview="advanced">Advanced</button>
-                  <button data-setview="playful">Playful</button>
-                </div>
-                <button className="btn-ghost up-out" id="logoutBtn" role="menuitem"><i data-ic="logout" />Log out</button>
-              </div>
-            </div>
           </div>
         </header>
         <main className="main" id="main">
@@ -273,30 +247,27 @@ export default function EarthanovaMarkup() {
                 </div>
               </div>
               <div className="cards" id="cards">
-                <div className="adv-lock" id="advLock" />
-                {/* BASIC */}
+                {/* BASIC: plain language for students and the public */}
                 <article className="card summary" data-views="basic" aria-labelledby="sumH">
                   <header className="card-h">
-                    <h2 id="sumH"><i data-ic="bulb" />In plain words</h2>
-                    <div className="right">
-                      <span className="tag">NASA open data</span>
-                    </div>
+                    <h2 id="sumH"><i data-ic="bulb" />In plain words</h2><div className="right"><span className="tag">NASA open data</span></div>
                   </header>
                   <div id="sumBody" />
                 </article>
-                <article className="card hi" data-views="basic advanced" aria-labelledby="hiH">
+                <article className="card case" data-views="basic" aria-labelledby="caseH">
                   <header className="card-h">
-                    <h2 id="hiH"><i data-ic="brain" />Human Intelligence</h2>
-                    <div className="right">
-                      <span className="tag">Indicative</span>
-                      <button className="icon-btn" aria-label="About these cards" title="Rule-based readings of open datasets. Not investment, safety or living advice.">
-                        <i data-ic="info" />
-                      </button>
-                    </div>
+                    <h2 id="caseH"><i data-ic="search" />Case board: what is changing here?</h2>
                   </header>
-                  <div className="hi-grid" id="hiGrid" />
+                  <p className="card-lead" id="caseLead" />
+                  <div className="case-grid" id="caseGrid" />
                 </article>
-                <article className="card ba" data-views="basic advanced" aria-labelledby="baH">
+                <article className="card toolkit" data-views="basic" aria-labelledby="tkH">
+                  <header className="card-h">
+                    <h2 id="tkH"><i data-ic="book" />Detective toolkit: words you will meet</h2>
+                  </header>
+                  <div id="toolkit" />
+                </article>
+                <article className="card ba" data-views="basic" aria-labelledby="baH">
                   <header className="card-h">
                     <h2 id="baH"><i data-ic="compare" />Before vs After</h2>
                     <div className="right">
@@ -329,84 +300,39 @@ export default function EarthanovaMarkup() {
                   </div>
                   <p className="ba-note" id="baNote">Imagery: Esri World Imagery Wayback (release dates). Climate: NASA POWER (MERRA-2).</p>
                 </article>
-                <article className="card fc" data-views="basic advanced" aria-labelledby="fcH">
+                {/* ADVANCED: explore, test and compare variables */}
+                <article className="card xp" data-views="advanced" aria-labelledby="xpH">
                   <header className="card-h">
-                    <h2 id="fcH"><i data-ic="bars" />5-Year Outlook <small>annual mean temperature, °C</small></h2>
-                    <div className="right">
-                      <span className="tag amber" title="Scenario outlook (NASA NEX-GDDP-CMIP6, not loaded yet). Projections are scenario-based, not weather forecasts.">
-                        Scenario outlook · not a forecast
-                      </span>
-                    </div>
+                    <h2 id="xpH"><i data-ic="flask" />Variable explorer</h2><div className="right"><span className="tag cyan">NASA POWER monthly, 1981 onward</span></div>
                   </header>
-                  <div className="fc-grid">
-                    <div className="chart-wrap" id="chartWrap">
-                      <svg id="chart" aria-hidden="true">
-                        <defs>
-                          <linearGradient id="fcGrad" x1="0" y1="0" x2="0" y2="1">
-                            <stop id="fcStop1" offset="0" stopColor="#22D3EE" stopOpacity=".30" />
-                            <stop offset="1" stopColor="#22D3EE" stopOpacity="0" />
-                          </linearGradient>
-                        </defs>
-                        <g className="grid" id="fcGrid" />
-                        <g className="ref" id="fcRef" />
-                        <path id="fcBand" />
-                        <path id="obsLine" />
-                        <path id="fcLine" />
-                        <line className="xh" id="fcXh" />
-                        <g id="fcDots" />
-                        <g id="fcLabels" />
-                        <rect id="fcHit" fill="transparent" />
-                      </svg>
-                      <div className="tip" id="fcTip" />
-                      <table className="sr-only" id="fcTable">
-                        <caption>Observed and projected annual mean temperature</caption>
-                        <thead>
-                          <tr>
-                            <th>Year</th>
-                            <th>Observed (NASA POWER)</th>
-                            <th>Model low</th>
-                            <th>Ensemble mean</th>
-                            <th>Model high</th>
-                          </tr>
-                        </thead>
-                        <tbody />
-                      </table>
-                    </div>
-                    <div className="scen">
-                      <h3>Scenarios · 2030</h3>
-                      <div className="scen-list" role="group" aria-label="Projection band">
-                        <button className="scen-btn" data-s="low" aria-pressed="false">
-                          <i data-ic="leaf" />
-                          <span className="nm">Model low</span>
-                          <span className="dv">—</span>
-                        </button>
-                        {" "}
-                        <button className="scen-btn" data-s="mean" aria-pressed="true">
-                          <i data-ic="trend" />
-                          <span className="nm">Ens. mean</span>
-                          <span className="dv">—</span>
-                        </button>
-                        {" "}
-                        <button className="scen-btn" data-s="high" aria-pressed="false">
-                          <i data-ic="alert" />
-                          <span className="nm">Model high</span>
-                          <span className="dv">—</span>
-                        </button>
-                      </div>
-                      <p className="scen-note" id="scenNote">Shaded band = range of 4 CMIP6 models.</p>
-                    </div>
-                  </div>
+                  <div id="advExplorer" />
                 </article>
-                <article className="card nasa" id="nasaCard" hidden data-views="basic advanced" aria-labelledby="nasaH">
+                <article className="card vs" data-views="advanced" aria-labelledby="vsH">
                   <header className="card-h">
-                    <h2 id="nasaH"><i data-ic="trend" />NASA time series &amp; 12-month forecast <small id="nasaSub" /></h2>
+                    <h2 id="vsH"><i data-ic="compare" />Compare two variables</h2>
+                  </header>
+                  <div id="advVs" />
+                </article>
+                <article className="card mx" data-views="advanced" aria-labelledby="mxH">
+                  <header className="card-h">
+                    <h2 id="mxH"><i data-ic="layers" />Correlation matrix</h2>
+                  </header>
+                  <div id="advMatrix" />
+                </article>
+                <article className="card tt" data-views="advanced" aria-labelledby="ttH">
+                  <header className="card-h">
+                    <h2 id="ttH"><i data-ic="trend" />Trend tests for every variable</h2>
+                  </header>
+                  <div className="tbl-scroll" id="advTrendTbl" />
+                </article>
+                <article className="card nasa" id="nasaCard" hidden data-views="advanced" aria-labelledby="nasaH">
+                  <header className="card-h">
+                    <h2 id="nasaH"><i data-ic="trend" />12-month temperature forecast <small id="nasaSub" /></h2>
                     <div className="right"><span className="tag" title="Monthly NASA POWER data (MERRA-2 / CERES), 1981 to 2025">NASA POWER</span></div>
                   </header>
                   <p className="nasa-head" id="nasaHead" />
                   <div className="nasa-grid">
                     <div className="nasa-charts">
-                      <h3>Annual mean temperature and trend</h3>
-                      <svg className="nasa-chart" id="nasaAnnual" role="img" aria-label="Annual mean temperature 1981 to 2025 with trend line" />
                       <h3>Last 5 years and next 12 months (90% band)</h3>
                       <svg className="nasa-chart" id="nasaMonthly" role="img" aria-label="Monthly temperature, last five years, with a 12 month forecast and uncertainty band" />
                       <table className="sr-only" id="nasaFcTable">
@@ -416,11 +342,7 @@ export default function EarthanovaMarkup() {
                       </table>
                     </div>
                     <div className="nasa-side">
-                      <h3>Long-term trends</h3>
-                      <table className="tbl nasa-tbl" id="nasaTrends">
-                        <thead><tr><th>Variable</th><th>Per decade</th><th>p</th><th>Sig.</th></tr></thead>
-                        <tbody />
-                      </table>
+                      <h3>Notes on the data</h3>
                       <ul className="nasa-cav" id="nasaCaveats" />
                       <h3>How reliable is the forecast?</h3>
                       <table className="tbl nasa-tbl" id="nasaRel">
@@ -432,79 +354,46 @@ export default function EarthanovaMarkup() {
                     </div>
                   </div>
                 </article>
-                <article className="card kc" data-views="basic advanced" aria-labelledby="kcH">
+                <article className="card " data-views="advanced" aria-labelledby="advYearsH">
                   <header className="card-h">
-                    <h2 id="kcH"><i data-ic="bars" />Key Changes</h2>
-                    <div className="right">
-                      <button className="link-btn" data-nav-link="risk">Risk Monitoring<i data-ic="chevr" /></button>
-                    </div>
-                  </header>
-                  <div className="kc-grid" id="kcGrid" />
-                  <p className="verdict" id="verdict" />
-                </article>
-                {/* ADVANCED */}
-                <article className="card" data-views="advanced" aria-labelledby="advStatsH">
-                  <header className="card-h">
-                    <h2 id="advStatsH"><i data-ic="flask" />Statistical summary</h2>
-                    <div className="right">
-                      <span className="tag cyan">Researcher detail</span>
-                    </div>
-                  </header>
-                  <div id="advStats" />
-                </article>
-                <article className="card" data-views="advanced" aria-labelledby="advYearsH">
-                  <header className="card-h">
-                    <h2 id="advYearsH"><i data-ic="bars" />Yearly record <small>NASA POWER (temperature, soil, solar) · NASA GPM IMERG (rain) · calendar years</small></h2>
+                    <h2 id="advYearsH"><i data-ic="bars" />Yearly record <small>study period, calendar years</small></h2>
                   </header>
                   <div className="tbl-scroll" id="advYears" />
                 </article>
-                <article className="card" data-views="advanced" aria-labelledby="advModelsH">
+                <article className="card " data-views="advanced" aria-labelledby="advHazH">
                   <header className="card-h">
-                    <h2 id="advModelsH"><i data-ic="trend" />CMIP6 model ensemble <small>2026–2030, bias-adjusted</small></h2>
-                  </header>
-                  <div className="tbl-scroll" id="advModels" />
-                </article>
-                <article className="card" data-views="advanced" aria-labelledby="advHazH">
-                  <header className="card-h">
-                    <h2 id="advHazH"><i data-ic="quake" />Hazard catalogue</h2>
-                    <div className="right">
-                      <button className="link-btn" data-nav-link="risk">Open Risk Monitoring<i data-ic="chevr" /></button>
-                    </div>
+                    <h2 id="advHazH"><i data-ic="quake" />Hazard catalogue</h2><div className="right"><button className="link-btn" data-nav-link="risk">Open Risk Monitoring<i data-ic="chevr" /></button></div>
                   </header>
                   <div id="advHaz" />
                 </article>
-                <article className="card" data-views="advanced" aria-labelledby="advExpH">
+                <article className="card " data-views="advanced" aria-labelledby="advExpH">
                   <header className="card-h">
                     <h2 id="advExpH"><i data-ic="download" />Export &amp; methods</h2>
                   </header>
                   <div id="advExport" />
                 </article>
-                {/* PLAYFUL */}
+                {/* PLAYFUL: games built from the same data */}
                 <article className="card quest" data-views="playful" aria-labelledby="qH">
                   <header className="card-h">
-                    <h2 id="qH"><i data-ic="trophy" />Planet Quest</h2>
-                    <div className="right">
-                      <span className="tag mint" id="qLevelTag">Level 1</span>
-                    </div>
+                    <h2 id="qH"><i data-ic="trophy" />Detective rank</h2><div className="right"><span className="tag mint" id="qLevelTag">Level 1</span></div>
                   </header>
                   <div id="questBody" />
                 </article>
-                <article className="card fun" data-views="playful" aria-labelledby="fH">
+                <article className="card finger" data-views="playful" aria-labelledby="fH">
                   <header className="card-h">
-                    <h2 id="fH"><i data-ic="bulb" />Meet your place</h2>
+                    <h2 id="fH"><i data-ic="thermo" />Climate fingerprint</h2>
                   </header>
-                  <div className="fun-grid" id="funGrid" />
+                  <div id="funFinger" />
                 </article>
                 <article className="card quiz" data-views="playful" aria-labelledby="zH">
                   <header className="card-h">
-                    <h2 id="zH"><i data-ic="bolt" />Quick quiz <small>answers hide in the real data</small></h2>
-                    <div className="right" id="quizMeta" />
+                    <h2 id="zH"><i data-ic="search" />Case files <small>every answer is hidden in the real data</small></h2><div className="right"><div id="quizMeta" /></div>
                   </header>
                   <div id="quizBody" />
                 </article>
                 <article className="card guess" data-views="playful" aria-labelledby="gH">
                   <header className="card-h">
-                    <h2 id="gH"><i data-ic="trend" />Guess the future</h2>
+                    <h2 id="gH"><i data-ic="bolt" />Beat the forecast</h2>
                   </header>
                   <div id="guessBody" />
                 </article>
@@ -553,8 +442,6 @@ export default function EarthanovaMarkup() {
             </div>
           </section>
           <section className="page" id="pageCompare" aria-label="Compare places" />
-          <section className="page" id="pagePlans" aria-label="Plans" />
-          <section className="page" id="pageProfile" aria-label="Profile" />
           <section className="page" id="pageReports" aria-label="Reports" />
         </main>
       </div>
@@ -568,74 +455,6 @@ export default function EarthanovaMarkup() {
             <span id="splashFill" />
           </div>
           <p className="splash-note" id="splashNote">Preparing your Earth explorer…</p>
-        </div>
-      </div>
-      <div className="modal" id="auth" role="dialog" aria-modal="true" aria-labelledby="authTitle" hidden>
-        <div className="modal-card">
-          <button className="icon-btn modal-x" id="authClose" aria-label="Close"><i data-ic="close" /></button>
-          <aside className="auth-side">
-            <svg className="brand-logo" viewBox="0 0 48 48" aria-hidden="true">
-              <circle cx="24" cy="24" r="21" fill="none" stroke="#22D3EE" strokeWidth="2.4" />
-              <circle cx="24" cy="24" r="13" fill="none" stroke="#22D3EE" strokeWidth="2" />
-              <circle cx="24" cy="24" r="5" fill="#22D3EE" />
-            </svg>
-            <h3>Scan any place on Earth</h3>
-            <ul>
-              <li><i data-ic="scan" />Climate history and 5-year outlook</li>
-              <li><i data-ic="radar" />One watch tower per natural hazard</li>
-              <li><i data-ic="layers" />Star places to keep as your projects</li>
-              <li><i data-ic="file" />Save your research as PDF reports</li>
-            </ul>
-            <p>Your dashboard adapts to you: simple for everyone, detailed for scientists, playful for students.</p>
-          </aside>
-          <div className="auth-main">
-            <p className="eyebrow" id="authReason">Create a free account to continue.</p>
-            <h2 id="authTitle">Create your account</h2>
-            <div className="tabs" role="tablist" aria-label="Account">
-              <button role="tab" data-mode="register" aria-selected="true">Register</button>
-              {" "}
-              <button role="tab" data-mode="login" aria-selected="false">Log in</button>
-            </div>
-            <form id="loginForm" className="form" noValidate>
-              <label>Email<input id="liEmail" type="email" autoComplete="email" required placeholder="you@example.com" /></label>
-              {" "}
-              <label>Password<input id="liPass" type="password" autoComplete="current-password" required placeholder="Your password" /></label>
-              <p className="form-err" id="liErr" role="alert" />
-              <button className="btn-primary" type="submit">Log in</button>
-            </form>
-            <form id="regForm1" className="form" noValidate>
-              <p className="step">Step 1 of 2 · Your account</p>
-              <label>Full name<input id="rgName" type="text" autoComplete="name" required placeholder="Your name" /></label>
-              {" "}
-              <label>Email<input id="rgEmail" type="email" autoComplete="email" required placeholder="you@example.com" /></label>
-              {" "}
-              <label>
-                Password
-                <input id="rgPass" type="password" autoComplete="new-password" required minLength={6} placeholder="At least 6 characters" />
-              </label>
-              <p className="form-err" id="rg1Err" role="alert" />
-              <button className="btn-primary" type="submit">Continue</button>
-            </form>
-            <form id="regForm2" className="form" noValidate>
-              <p className="step">Step 2 of 2 · Tell us about you</p>
-              <fieldset>
-                <legend>Which describes you best?</legend>
-                <div className="role-grid" id="roleGrid" />
-              </fieldset>
-              <label>Field or specialty<select id="rgField" /></label>
-              <fieldset>
-                <legend>What are you interested in? <span>(pick any)</span></legend>
-                <div className="chips" id="interestGrid" />
-              </fieldset>
-              <label>What will you use Earthanova for?<select id="rgPurpose" /></label>
-              <p className="form-err" id="rg2Err" role="alert" />
-              <div className="pop-actions">
-                <button className="btn-secondary" type="button" id="rgBack">Back</button>
-                <button className="btn-primary" type="submit">Create account</button>
-              </div>
-            </form>
-            <p className="auth-note">Demo accounts are stored only in this browser.</p>
-          </div>
         </div>
       </div>
       <div className="modal" id="dlg" role="dialog" aria-modal="true" aria-labelledby="dlgT" hidden>

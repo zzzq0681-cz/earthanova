@@ -3,7 +3,7 @@ import "./globals.css";
 
 const title = "Earthanova — Explore Earth. Understand change.";
 const description =
-  "Earthanova: click a place on Earth and explore NASA time series, temperature trends and a 12-month forecast.";
+  "Earthanova: be a data detective: pick any place on Earth, explore NASA climate variables, and test whether their trends are real.";
 
 export const metadata: Metadata = {
   title,
@@ -17,14 +17,14 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        {/* Loaded as plain Google Fonts so the literal "Sora"/"Inter" family names used
+        {/* Loaded as plain Google Fonts so the literal "Bricolage Grotesque"/"Inter" family names used
             in CSS and in JS-generated SVG keep working. */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
         {/* eslint-disable-next-line @next/next/no-page-custom-font */}
         <link
           rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap"
         />
       </head>
       {/* lib/earthanova.js switches these data-* attributes at runtime. */}

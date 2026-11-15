@@ -5,6 +5,8 @@ import Globe from 'globe.gl';
 import {towerViz, renderChart as renderHzChart, wireCharts as wireHzCharts} from './hazard-charts.js';
 import {buildPlan, bestTimeHtml, riskCalendarHtml, eonetByMonth, wirePlanner} from './compare-planner.js';
 import {mlHtml, mlErrorHtml, nextDaysHtml} from './compare-ml.js';
+import {initViews, renderBasic, renderAdvanced as renderAdvViews, renderPlayful as renderPlayViews} from './views.js';
+import {VARS, series as dvSeries, verdict as dvVerdict, fmt as dvFmt, sgn as dvSgn, pTxt} from './detective.js';
 import {eonetEvents, nasaHazards, nasaWindow, nasaClimateYear, nasaPredict, apiBase, nasaFind, nasaEnsure, nasaLoad, nasaBuildAnalysis, isStatic, reportUrl} from './nasa-data.js';
 
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
@@ -95,7 +97,7 @@ const PRESETS = [
   {name:'Aswan, Egypt', short:'Aswan', lat:24.09, lon:32.9}
 ].map(withId);
 function withId(l){ return {...l, lat:+(+l.lat).toFixed(4), lon:+(+l.lon).toFixed(4), id:`${(+l.lat).toFixed(2)},${(+l.lon).toFixed(2)}`}; }
-const uKey = k => `es:${k}:${S.user?.id || 'guest'}`;
+const uKey = k => `es:${k}:guest`;
 const favs = () => store.get(uKey('favs'), []);
 const recents = () => store.get(uKey('recent'), []);
 const isFav = l => favs().some(f => f.id === l.id);
@@ -303,119 +305,12 @@ const fmtLat = v => `${Math.abs(v).toFixed(2)}° ${v >= 0 ? 'N' : 'S'}`;
 const fmtLon = v => `${Math.abs(v).toFixed(2)}° ${v >= 0 ? 'E' : 'W'}`;
 const ago = t => { const m = Math.round((Date.now() - t)/60000); return m < 2 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m/60)} h ago` : `${Math.round(m/1440)} d ago`; };
 
-/* ---------- accounts (stored in this browser only) ---------- */
-const ROLES = [
-  {id:'scientist', label:'Scientist / Researcher', desc:'I need the full data, statistics and exports.', view:'advanced', icon:'flask'},
-  {id:'student', label:'Student', desc:'I am learning. Keep it simple and fun.', view:'playful', icon:'book'},
-  {id:'developer', label:'Developer / Engineer', desc:'I build with data, models or APIs.', view:'advanced', icon:'code'},
-  {id:'professional', label:'Planner / Professional', desc:'Farming, energy, insurance, cities, safety.', view:'basic', icon:'briefcase'},
-  {id:'general', label:'Everyday person', desc:'I just want to understand my area.', view:'basic', icon:'user'}
-];
-const FIELDS = ['Climate science','Geology / seismology','Hydrology & water','Environmental science','Agriculture & food','Urban planning','Energy','Data science / software','School or general studies','Other'];
-const INTERESTS = ['Temperature & climate','Rainfall & drought','Floods','Earthquakes','Air quality','Sea level & coasts','Solar energy','Agriculture','Cities & planning'];
-const PURPOSES = ['Research or publication','Studying or homework','Building an app or model','Work: planning or risk assessment','Personal curiosity'];
-const roleOf = id => ROLES.find(r => r.id === id) || ROLES[4];
-const allUsers = () => store.get('es:users', []);
-async function sha(text){
-  try{ const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)); return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2,'0')).join(''); }
-  catch{ return btoa(unescape(encodeURIComponent(text))); }
-}
-const publicUser = u => ({id:u.id, name:u.name, email:u.email, role:u.role, field:u.field, interests:u.interests, purpose:u.purpose});
-async function registerUser(d){
-  const list = allUsers(), email = d.email.trim().toLowerCase();
-  if(list.some(u => u.email === email)) throw new Error('An account with this email already exists. Try logging in.');
-  const salt = Math.random().toString(36).slice(2) + Date.now().toString(36);
-  const u = {id:'u' + Date.now().toString(36) + Math.random().toString(36).slice(2,5), name:d.name.trim(), email, salt, hash:await sha(salt + d.password), role:d.role, field:d.field, interests:d.interests, purpose:d.purpose, created:Date.now()};
-  store.set('es:users', [...list, u]); return u;
-}
-async function verifyUser(email, password){
-  const u = allUsers().find(x => x.email === email.trim().toLowerCase());
-  if(!u || u.hash !== await sha(u.salt + password)) throw new Error('Email or password is incorrect.');
-  return u;
-}
-function setUser(u){
-  S.user = u ? publicUser(u) : null;
-  store.set('es:session', u ? u.id : null);
-  RP.list = []; RP.full = {}; RP.err = ''; RP.tok = u ? store.get('es:tok:' + u.id, null) : null;
-  document.body.classList.toggle('authed', !!u);
-  if(u){
-    const initials = u.name.trim().split(/\s+/).map(w => w[0]).slice(0,2).join('').toUpperCase() || 'EA';
-    $('#userBtn').textContent = initials; $('#upName').textContent = u.name; $('#upEmail').textContent = u.email; $('#upRole').textContent = roleOf(u.role).label;
-    let v0 = store.get(uKey('view'), null) || roleOf(u.role).view; if(v0 === 'advanced' && !hasAdvanced()) v0 = 'basic';
-    setView(v0, false); renderPlanChip();
-    if(RP.tok) loadReports(); else RP.err = 'Log out and log in again once to connect your saved reports.';
-  }
-}
+/* ---------- dashboard view (Basic / Advanced / Playful) ---------- */
 function setView(v, persist = true){
   S.view = v; document.body.dataset.view = v;
   $$('[data-setview]').forEach(b => b.setAttribute('aria-pressed', b.dataset.setview === v));
-  if(persist && S.user) store.set(uKey('view'), v);
-  applyLocks();
-  if(S.A) requestAnimationFrame(() => { renderChart(); refreshMosaics(); });
-}
-function closeUserPop(){ $('#userPop').hidden = true; $('#userBtn').setAttribute('aria-expanded','false'); }
-
-/* auth dialog */
-const AU = {mode:'register', step:1, role:null, interests:new Set(), d:{}};
-function buildAuthChoices(){
-  $('#roleGrid').innerHTML = ROLES.map(r => `<button type="button" class="role" data-role="${r.id}" aria-pressed="false">${ic(r.icon)}<span><b>${r.label}</b><small>${r.desc}</small></span></button>`).join('');
-  $('#interestGrid').innerHTML = INTERESTS.map(t => `<button type="button" class="chip-opt" data-interest="${esc(t)}" aria-pressed="false">${esc(t)}</button>`).join('');
-  $('#rgField').innerHTML = `<option value="">Choose…</option>` + FIELDS.map(f => `<option>${esc(f)}</option>`).join('');
-  $('#rgPurpose').innerHTML = `<option value="">Choose…</option>` + PURPOSES.map(f => `<option>${esc(f)}</option>`).join('');
-}
-function showAuthPane(){
-  const reg = AU.mode === 'register';
-  $('#loginForm').hidden = reg; $('#regForm1').hidden = !reg || AU.step !== 1; $('#regForm2').hidden = !reg || AU.step !== 2;
-  $$('#auth .tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.mode === AU.mode));
-  $('#authTitle').textContent = !reg ? 'Welcome back' : AU.step === 1 ? 'Create your account' : 'Tell us how you will use it';
-  $$('#auth .form-err').forEach(e => e.textContent = '');
-}
-function openAuth(mode = 'register', reason = ''){
-  AU.mode = mode; AU.step = 1;
-  $('#authReason').textContent = reason || (mode === 'register' ? 'Create a free account to continue.' : 'Log in to continue.');
-  showAuthPane(); $('#auth').hidden = false; document.body.classList.add('modal-open');
-  setTimeout(() => $(mode === 'register' ? '#rgName' : '#liEmail').focus(), 60);
-}
-function closeAuth(cancel = true){ $('#auth').hidden = true; document.body.classList.remove('modal-open'); if(cancel) S.pending = null; }
-function afterAuth(welcome){
-  closeAuth(false); renderPresets(); fillLocation(); if(world) world.labelsData(globeLabels());
-  toast(welcome);
-  if(S.pending){ const p = S.pending; S.pending = null; S.loc = withId(p.loc); $('#radius').value = String(p.radius); scan(); }
-  else if(S.page === 'home' && S.state === 'selected'){ /* user can press Scan Area */ }
-}
-function wireAuth(){
-  buildAuthChoices();
-  $('#authClose').addEventListener('click', () => closeAuth(true));
-  $('#auth').addEventListener('mousedown', e => { if(e.target.id === 'auth') closeAuth(true); });
-  $$('#auth .tabs button').forEach(b => b.addEventListener('click', () => { AU.mode = b.dataset.mode; AU.step = 1; showAuthPane(); }));
-  $('#loginForm').addEventListener('submit', async e => {
-    e.preventDefault(); const err = $('#liErr'); err.textContent = '';
-    if(!$('#liEmail').value.trim() || !$('#liPass').value){ err.textContent = 'Enter your email and password.'; return; }
-    try{ const pw = $('#liPass').value, u = await verifyUser($('#liEmail').value, pw); setUser(u); afterAuth(`Welcome back, ${u.name.split(' ')[0]}.`); acctSignIn(u.email, pw); }
-    catch(ex){ err.textContent = ex.message; }
-  });
-  $('#regForm1').addEventListener('submit', e => {
-    e.preventDefault(); const err = $('#rg1Err');
-    const name = $('#rgName').value.trim(), email = $('#rgEmail').value.trim(), pass = $('#rgPass').value;
-    if(!name){ err.textContent = 'Please enter your name.'; return; }
-    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ err.textContent = 'Enter a valid email address.'; return; }
-    if(pass.length < 6){ err.textContent = 'Password must be at least 6 characters.'; return; }
-    if(allUsers().some(u => u.email === email.toLowerCase())){ err.textContent = 'That email is already registered. Use the Log in tab.'; return; }
-    AU.d = {name, email, password:pass}; AU.step = 2; showAuthPane();
-  });
-  $('#roleGrid').addEventListener('click', e => { const b = e.target.closest('[data-role]'); if(!b) return; AU.role = b.dataset.role; $$('#roleGrid .role').forEach(x => x.setAttribute('aria-pressed', x === b)); });
-  $('#interestGrid').addEventListener('click', e => { const b = e.target.closest('[data-interest]'); if(!b) return; const k = b.dataset.interest; AU.interests.has(k) ? AU.interests.delete(k) : AU.interests.add(k); b.setAttribute('aria-pressed', AU.interests.has(k)); });
-  $('#rgBack').addEventListener('click', () => { AU.step = 1; showAuthPane(); });
-  $('#regForm2').addEventListener('submit', async e => {
-    e.preventDefault(); const err = $('#rg2Err');
-    if(!AU.role){ err.textContent = 'Pick the option that describes you best.'; return; }
-    try{
-      const u = await registerUser({...AU.d, role:AU.role, field:$('#rgField').value, interests:[...AU.interests], purpose:$('#rgPurpose').value});
-      setUser(u); acctSignIn(u.email, AU.d.password); AU.d = {};
-      afterAuth('Account created on the Basic plan.'); setTimeout(() => offerTrial(u), 350);
-    }catch(ex){ err.textContent = ex.message; AU.step = 1; showAuthPane(); $('#rg1Err').textContent = ex.message; }
-  });
-  document.addEventListener('keydown', e => { if(e.key === 'Escape' && !$('#auth').hidden) closeAuth(true); });
+  if(persist) store.set('es:view', v);
+  if(S.A) requestAnimationFrame(() => { renderView(v); refreshMosaics(); });
 }
 
 /* ---------- globe ---------- */
@@ -476,9 +371,9 @@ function renderMosaic(el){
 }
 const mosaics = $$('.mosaic');
 const ro = new ResizeObserver(es => es.forEach(e => {
-  if(e.target.id === 'stage') sizeGlobe(); else if(e.target.id === 'chartWrap') renderChart(); else renderMosaic(e.target);
+  if(e.target.id === 'stage') sizeGlobe(); else renderMosaic(e.target);
 }));
-mosaics.forEach(m => ro.observe(m)); ro.observe($('#stage')); ro.observe($('#chartWrap'));
+mosaics.forEach(m => ro.observe(m)); ro.observe($('#stage'));
 const refreshMosaics = () => mosaics.forEach(m => { delete m.dataset.key; renderMosaic(m); });
 
 /* ---------- hazard towers (Risk Monitoring) ---------- */
@@ -595,7 +490,7 @@ function drawTowers(svg, defs, levels, pre, pick, sel){
     beams += `<linearGradient id="${pre}bg${i}" gradientUnits="userSpaceOnUse" x1="${dx}" y1="${dy}" x2="${RTGT.x}" y2="${RTGT.y}"><stop offset="0" stop-color="${col}" stop-opacity=".8"/><stop offset="1" stop-color="${col}" stop-opacity=".06"/></linearGradient><polygon class="beam${dim}" data-i="${i}" style="animation-delay:${i*.3}s" points="${dx},${dy} ${RTGT.x+px},${RTGT.y+py} ${RTGT.x-px},${RTGT.y-py}" fill="url(#${pre}bg${i})"/>`;
     towers += `<g class="tower-g" data-i="${i}" tabindex="0" role="button" aria-label="${defs[i].name}: ${LEVEL[lv][0]}"><title>${defs[i].code} ${defs[i].name}</title><use href="#tower" x="${t.x - 40*RS}" y="${t.y - 140*RS}" width="${80*RS}" height="${140*RS}"/><text x="${t.x}" y="${t.y + 18}" text-anchor="middle" fill="#EAF8FF" font-family="Inter, sans-serif" font-weight="600" font-size="13">${defs[i].hazard}</text></g>`;
     const side = i < 3 ? 1 : -1, cw = 104, chx = side > 0 ? t.x + 24*RS : t.x - 24*RS - cw, chy = t.y - 140*RS - 8;
-    chips += `<g class="rchip" data-i="${i}"><rect x="${chx}" y="${chy}" width="${cw}" height="40" rx="8" fill="rgba(6,17,31,.92)" stroke="${col}" stroke-opacity=".7"/><text x="${chx+11}" y="${chy+17}" fill="#EAF8FF" font-family="Sora, sans-serif" font-weight="600" font-size="13">${defs[i].code}</text><circle cx="${chx+14}" cy="${chy+29}" r="3.4" fill="${col}"/><text x="${chx+23}" y="${chy+32.5}" fill="${col}" font-family="Inter, sans-serif" font-weight="700" font-size="11">${LEVEL[lv][0]}</text></g>`;
+    chips += `<g class="rchip" data-i="${i}"><rect x="${chx}" y="${chy}" width="${cw}" height="40" rx="8" fill="rgba(6,17,31,.92)" stroke="${col}" stroke-opacity=".7"/><text x="${chx+11}" y="${chy+17}" fill="#EAF8FF" font-family="Bricolage Grotesque, Sora, sans-serif" font-weight="600" font-size="13">${defs[i].code}</text><circle cx="${chx+14}" cy="${chy+29}" r="3.4" fill="${col}"/><text x="${chx+23}" y="${chy+32.5}" fill="${col}" font-family="Inter, sans-serif" font-weight="700" font-size="11">${LEVEL[lv][0]}</text></g>`;
   });
   const T = RTGT;
   svg.innerHTML = `<defs><radialGradient id="${pre}tgt"><stop offset="0" stop-color="#22D3EE" stop-opacity=".55"/><stop offset="1" stop-color="#22D3EE" stop-opacity="0"/></radialGradient></defs>
@@ -659,44 +554,17 @@ function renderRisk(){
 
 /* ---------- dashboard ---------- */
 function renderDashboardCore(){
-  const A = S.A, I = S.I = interpret(A);
-  const hiItem = (icon, k, [val, tone, detail], flag) => `<div class="hi-item tone-${tone}"><span class="hi-ic">${ic(icon)}</span><div><p class="hi-k">${k}</p><p class="hi-v">${esc(val)}</p><p class="hi-d">${esc(detail)}</p></div>${flag ? `<span class="hi-flag">${ic(flag)}</span>` : ''}</div>`;
-  $('#hiGrid').innerHTML = hiItem('sun','Solar potential', I.hi.solar, I.hi.solar[1]==='good'?'check':'') + hiItem('cloud','Climate indicator', I.hi.climate, I.hi.climate[1]==='warn'?'alert':'check') + hiItem('wind','Air quality', I.hi.air, I.hi.air[1]==='good'?'check':I.hi.air[1]==='warn'?'alert':'');
-
-  // before / after
+  const A = S.A; S.I = interpret(A);
   { const pd = per(A); $('#baBeforeT').textContent = `Baseline ${pd.baseLabel}`; $('#baAfterT').textContent = `Current ${pd.curLabel}`; $('#baRange').textContent = `${pd.baseLabel} avg vs ${pd.curLabel} avg`; }
   $('#baBeforeVals').textContent = `${A.base.temp?.toFixed(1) ?? '—'} °C · ${A.base.rain ?? '—'} mm/yr`;
   $('#baAfterVals').textContent = `${A.cur.temp?.toFixed(1) ?? '—'} °C · ${A.cur.rain ?? '—'} mm/yr`;
   $('#baBeforeDate').textContent = A.img?.before ? `Imagery ${A.img.before.date}` : 'Current imagery';
   $('#baAfterDate').textContent = A.img?.after ? `Imagery ${A.img.after.date}` : 'Current imagery';
-  $('#baNote').textContent = A.img ? (A.img.same ? 'No newer Wayback imagery for this tile in the chosen period — both panels show the same capture. Climate: NASA POWER.' : 'Imagery: Esri World Imagery Wayback (release dates; capture may be earlier). Climate: NASA POWER.') : 'Historical imagery unavailable — showing current imagery. Climate: NASA POWER.';
-
-  // key changes
-  const tiles = [
-    {m:'temp', label:'Temperature', icon:'thermo', v:I.dT, text:`${sgn(I.dT)} °C`, from:`${A.base.temp?.toFixed(1)} → ${A.cur.temp?.toFixed(1)} °C`, flag:S.I.status[0]==='finding'},
-    {m:'rain', label:'Rainfall', icon:'drop', v:I.dRain, text:I.dRain == null ? (I.dryRain ? 'Hyper-arid' : 'n/a') : `${sgn(I.dRain,0)}%${I.shortRain ? '*' : ''}`, from:`${A.base.rain ?? '—'} → ${A.cur.rain ?? '—'} mm/yr${I.shortRain ? ` · *short window: ${A.rainN.cur} yr vs ${A.rainN.base} yr` : ''}`, flag:S.I.status[1]==='finding'},
-    {m:'hot', label:`Days ≥ ${A.hotBase} °C`, icon:'flame', v:I.dHot, text:I.dHot == null ? 'n/a' : `${sgn(I.dHot,0)}/yr`, from:`${A.base.hot ?? '—'} → ${A.cur.hot ?? '—'} days`, flag:I.dHot != null && I.dHot >= 5},
-    {m:'soil', label:'Soil moisture', icon:'soil', v:I.drySoil ? A.cur.soil - A.base.soil : I.dSoil, text:I.drySoil ? 'Very dry' : I.dSoil == null ? 'n/a' : `${sgn(I.dSoil,0)}%`, from:A.base.soil == null ? 'n/a over water' : `${A.base.soil.toFixed(3)} → ${A.cur.soil.toFixed(3)}`, flag:I.dSoil != null && Math.abs(I.dSoil) >= 10}
-  ];
-  $('#kcGrid').innerHTML = tiles.map(t => { const dir = t.v == null || t.v === 0 ? 'flat' : t.v > 0 ? 'up' : 'down';
-    return `<div class="kc-tile${t.flag?' flag':''}" data-metric="${t.m}"><span class="kc-ic">${ic(t.icon)}</span><div style="min-width:0"><p class="kc-k">${t.label}</p><p class="kc-v">${t.text}${ic(dir, `role="img" aria-label="${dir==='up'?'increased':dir==='down'?'decreased':'no change'}"`)}</p><p class="kc-s">${t.from}</p></div></div>`; }).join('');
-  const tr = A.trend;
-  $('#verdict').innerHTML = tr ? `<b>Trend ${per(A).label}:</b> ${sgn(tr.slope,2)} °C/yr — ${tr.sig ? 'statistically significant (95%)' : `not statistically significant (only ${tr.n} years)`}. Rainfall ${I.dRain == null ? (I.dryRain ? 'is hyper-arid (a few mm/yr), so no % change' : 'n/a') : I.dRain <= -5 ? 'decreased' : I.dRain >= 5 ? 'increased' : 'roughly stable'} vs baseline${I.shortRain ? ' (short rain window, not a trend)' : ''}.` : '<b>Trend:</b> insufficient data.';
-
-  // forecast
-  $$('.scen-btn').forEach(b => { const k = b.dataset.s, v = A.proj?.[k]?.[4];
-    b.disabled = !A.proj; b.querySelector('.dv').textContent = v == null ? '—' : `${v.toFixed(1)} °C`;
-    b.setAttribute('aria-label', `${b.querySelector('.nm').textContent}: ${v == null ? 'unavailable' : v.toFixed(1)+' °C in '+(per(A).projYears[4] ?? '')}`); });
-  $('#scenNote').textContent = A.proj ? `Band: ${Object.keys(A.proj.models).length} CMIP6 models` : (A.nasa ? 'NASA NEX-GDDP-CMIP6 projections are not loaded yet. See the 12-month forecast below.' : 'CMIP6 projections unavailable for this point.');
-  const rows = [...A.years.map(r => [r.year, r.temp, null, null, null]), ...per(A).projYears.map((y,i) => [y, null, A.proj?.low[i], A.proj?.mean[i], A.proj?.high[i]])];
-  $('#fcTable tbody').innerHTML = rows.map(r => `<tr>${r.map(c => `<td>${c == null ? '—' : c}</td>`).join('')}</tr>`).join('');
-  renderChart();
+  $('#baNote').textContent = A.img ? (A.img.same ? 'No newer Wayback imagery for this tile in the chosen period, so both panels show the same capture. Climate: NASA POWER.' : 'Imagery: Esri World Imagery Wayback (release dates; capture may be earlier). Climate: NASA POWER.') : 'Historical imagery unavailable, showing current imagery. Climate: NASA POWER.';
   renderNasaPanel();
-
-  // status bar
   const ageMin = Math.round((Date.now() - A.fetchedAt)/60000);
   $('#sbChip span').textContent = ageMin < 2 ? 'Data ready' : `Cached · ${ageMin < 60 ? ageMin+' min' : Math.round(ageMin/60)+' h'} ago`;
-  $('#sbSrc').textContent = A.nasa ? 'NASA POWER' : A.proj ? 'ERA5 · CMIP6' : 'ERA5';
+  $('#sbSrc').textContent = A.nasa ? 'NASA POWER' : 'ERA5';
   $('#locElev').textContent = A.elev != null ? `${Math.round(A.elev)} m` : '—';
   $('#locArea').textContent = `${A.radiusKm} km`;
 }
@@ -734,14 +602,14 @@ function renderNasaPanel(){
   const b = A.nasa.bundle, s = b.series, T = b.trends.trends, tr = Object.fromEntries(T.map(t => [t.variable, t]));
   const at = tr.annual_mean_temp, sm = tr.summer_JJA_mean_temp, y0 = s.month[0].slice(0, 4), y1 = s.month[s.month.length - 1].slice(0, 4);
   $('#nasaSub').textContent = `${A.nasa.place.name} · NASA POWER ${y0}–${y1}`;
-  $('#nasaHead').innerHTML = `Long-term warming <b>${sgn(at.slope_per_decade, 2)} °C per decade</b> (${at.significant ? 'statistically significant' : 'not significant'}); summer <b>${sgn(sm.slope_per_decade, 2)} °C per decade</b>. Mann-Kendall test with Sen's slope on ${at.n_years} annual values.`;
+  $('#nasaHead').innerHTML = `Next 12 months of monthly temperature from a seasonal + trend model with a machine-learning correction, trained on NASA POWER. Long-term warming <b>${sgn(at.slope_per_decade, 2)} °C per decade</b> (${at.significant ? 'statistically significant' : 'not significant'}); summer <b>${sgn(sm.slope_per_decade, 2)} °C per decade</b>. Mann-Kendall test with Sen's slope on ${at.n_years} annual values.`;
 
   // chart 1: annual mean temperature + Sen trend line
   const yrs0 = [...new Set(s.month.map(m => +m.slice(0, 4)))];
   const ann = yrs0.map(y => { const v = s.month.map((m, i) => +m.slice(0, 4) === y ? s.t2m[i] : null).filter(x => x != null); return v.length === 12 ? mean(v) : null; });
   const slope = at.slope_per_decade / 10, ic0 = median(ann.map((v, i) => v == null ? null : v - slope * yrs0[i]));
   const idx = yrs0.map((_, i) => i), tk = idx.filter(i => (yrs0[i] - yrs0[0]) % 10 === 0).map(i => [i, yrs0[i]]); tk.push([idx.length - 1, yrs0[idx.length - 1]]);
-  nasaSvg($('#nasaAnnual'), {n:idx.length, ticks:tk, lines:[
+  if($('#nasaAnnual')) nasaSvg($('#nasaAnnual'), {n:idx.length, ticks:tk, lines:[
     {x:idx, y:ann, color:'#cfe3ef', dots:true, w:1.8},
     {x:[0, idx.length - 1], y:[ic0 + slope * yrs0[0], ic0 + slope * yrs0[idx.length - 1]], color:'#FFBE55', dash:'6 4', w:2}],
     labels:[{i:idx.length - 1, v:ic0 + slope * yrs0[idx.length - 1], text:`trend ${sgn(at.slope_per_decade, 2)} °C/decade`, color:'#FFBE55', anchor:'end', dy:-10}]});
@@ -758,7 +626,7 @@ function renderNasaPanel(){
 
   // trends table + caveats
   const order = ['annual_mean_temp', 'summer_JJA_mean_temp', 'annual_mean_daily_max', 'annual_precip', 'root_zone_wetness', 'solar_radiation'];
-  $('#nasaTrends tbody').innerHTML = order.filter(k => tr[k]).map(k => { const t = tr[k];
+  if($('#nasaTrends')) $('#nasaTrends tbody').innerHTML = order.filter(k => tr[k]).map(k => { const t = tr[k];
     return `<tr><td>${NASA_LABEL[k]}${t.caveat ? ` <span class="nasa-warn" title="${esc(t.caveat)}" aria-label="caution">⚠</span>` : ''}</td><td>${sgn(t.slope_per_decade, 3)} <small>${esc(t.unit.replace('degC/decade', '°C/decade'))}</small></td><td>${t.p_value < 0.001 ? '&lt;0.001' : t.p_value.toFixed(3)}</td><td>${t.significant ? 'yes' : 'no'}</td></tr>`; }).join('');
   const cav = T.filter(t => t.caveat);
   $('#nasaCaveats').innerHTML = cav.map(t => `<li><b>${NASA_LABEL[t.variable] || t.variable}:</b> ${esc(t.caveat)}</li>`).join('');
@@ -778,49 +646,24 @@ function renderDashboard(){
   const A = S.A;
   renderDashboardCore(); S.H = hazardReadings(A, S.I);
   $('#dhTitle').textContent = S.loc.name;
-  $('#dhSub').textContent = `${fmtLat(S.loc.lat)}, ${fmtLon(S.loc.lon)} · study period ${per(A).label} · ${A.radiusKm} km hazard radius · scanned ${ago(A.fetchedAt)}`;
-  renderSummary(); renderAdvanced(); renderPlayful();
+  $('#dhSub').textContent = `${fmtLat(S.loc.lat)}, ${fmtLon(S.loc.lon)} · events and imagery ${per(A).label} · ${A.radiusKm} km hazard radius · scanned ${ago(A.fetchedAt)}`;
+  renderView(S.view);
 }
-
-/* Basic: plain language */
-function plainSummary(A, I){
-  const n = S.loc.short, dT = I.dT;
-  const head = dT == null ? `Here is what we found for ${n}.` : dT >= 0.3 ? `${n} is getting warmer.` : dT <= -0.3 ? `${n} has been a little cooler lately.` : `${n}'s temperature has stayed about the same.`;
-  const pts = [];
-  if(dT != null) pts.push({icon:'thermo', text:Math.abs(dT) < 0.3 ? `Average temperature is about the same as in ${per(A).baseLabel}.` : `The average temperature is ${Math.abs(dT).toFixed(1)} °C ${dT > 0 ? 'higher' : 'lower'} than in ${per(A).baseLabel}.`});
-  if(I.dRain != null) pts.push({icon:'drop', text:I.dRain <= -10 ? `Recent years were drier: ${Math.abs(I.dRain)}% less rain than ${per(A).baseLabel}. Short windows, a few wet years can dominate.` : I.dRain >= 10 ? `Recent years were wetter: ${I.dRain}% more rain than ${per(A).baseLabel}. Short windows, a few wet years can dominate.` : 'The amount of yearly rain is about the same as before.'});
-  pts.push({icon:'wind', text:!A.aq ? 'Air quality data is not available here right now.' : A.aq.pm25 <= 15 ? 'The air is clean (fine particles are low).' : A.aq.pm25 <= 35 ? 'The air has a moderate level of fine particles. Sensitive people may notice.' : 'The air has a lot of fine particles. Limit long outdoor exercise on bad days.'});
-  const sol = A.cur.solar ?? A.base.solar;
-  if(sol != null) pts.push({icon:'sun', text:sol >= 5 ? 'It is very sunny here, which is great for solar power.' : sol >= 4 ? 'There is a fair amount of sun for solar power.' : 'Sunshine is on the lower side for solar power.'});
-  if(A.proj) pts.push({icon:'trend', text:`By ${per(A).projYears[4]} the average temperature is expected to be around ${A.proj.mean[4].toFixed(1)} °C.`});
-  const watch = I.flags.length ? `Worth keeping an eye on: ${I.flags.slice(0, 3).map(f => f.t.toLowerCase()).join('; ')}. See Risk Monitoring for details.` : 'Nothing unusual stands out right now.';
-  return {head, pts, watch, warn:I.flags.length > 0};
+/* Each view renders when it is shown, so charts are sized for the screen at that moment. */
+function renderView(v){
+  if(!S.A) return;
+  try{
+    if(v === 'basic') renderBasic(S.A, S.I, S.loc);
+    else if(v === 'advanced'){ renderAdvViews(S.A); renderAdvancedTables(); }
+    else renderPlayViews(S.A, S.loc);
+  }catch(e){ console.error('view', v, e); }
 }
-function renderSummary(){
-  const {head, pts, watch, warn} = plainSummary(S.A, S.I);
-  $('#sumBody').innerHTML = `<p class="sum-head">${esc(head)}</p><ul class="sum-list">${pts.map(p => `<li><span class="sum-ic">${ic(p.icon)}</span><span>${esc(p.text)}</span></li>`).join('')}</ul><p class="sum-watch ${warn ? 'warn' : 'ok'}">${ic(warn ? 'alert' : 'check')}<span>${esc(watch)}</span></p>`;
-}
-
-/* Advanced: all the detail */
-function renderAdvanced(){
-  const A = S.A, I = S.I, H = S.H, tr = A.trend;
-  $('#advStats').innerHTML = `<div class="kv kv4">
-    <div><span>Temperature change</span><b>${sgn(I.dT)} °C</b></div>
-    <div><span>Rainfall change</span><b>${I.dRain == null ? (I.dryRain ? 'Hyper-arid' : 'n/a') : sgn(I.dRain,0) + '%'}</b></div>
-    <div><span>Linear trend ${per(A).label}</span><b>${tr ? sgn(tr.slope,2) + ' °C/yr' : 'n/a'}</b></div>
-    <div><span>Regression t (n=${tr ? tr.n : '—'})</span><b>${tr ? (Math.abs(tr.t) > 999 ? (tr.t > 0 ? '> 999' : '< −999') : tr.t.toFixed(2)) : 'n/a'}</b></div>
-    <div><span>Significance (95%)</span><b>${tr ? (tr.sig ? 'Significant' : 'Not significant') : 'n/a'}</b></div>
-    <div><span>${A.nasa ? 'NASA grid point' : 'ERA5 grid cell'}</span><b class="mono">${A.grid.lat.toFixed(2)}, ${A.grid.lon.toFixed(2)}</b></div>
-    <div><span>Elevation (DEM)</span><b>${A.elev != null ? Math.round(A.elev) + ' m' : 'n/a'}</b></div>
-    <div><span>PM2.5 mean (last 5 years)</span><b>${A.aq ? A.aq.pm25 + ' µg/m³' : 'n/a'}</b></div></div>
-    <p>${tr ? `Ordinary least squares on ${tr.n} annual means: ${tr.sig ? 'the slope is significant at the 95% level.' : 'the slope is not significant at the 95% level, so treat it as directional.'}` : ''} Baseline (${per(A).baseLabel}) and current (${per(A).curLabel}) windows differ in length (${per(A).baseYears.length} vs ${per(A).curYears.length} years). Hot-day threshold ${A.hotBase} °C. Fetched ${new Date(A.fetchedAt).toISOString().replace('T',' ').slice(0,16)} UTC.</p>`;
-  const r = A.years.map(y => `<tr><td>${y.year}</td><td>${y.temp?.toFixed(2) ?? '—'}</td><td>${y.rain ?? '—'}</td><td>${y.hot ?? '—'}</td><td>${y.soil ?? '—'}</td><td>${y.solar?.toFixed(2) ?? '—'}</td></tr>`).join('');
-  const row = (lbl, o) => `<tr class="avg"><td>${lbl}</td><td>${o.temp?.toFixed(2) ?? '—'}</td><td>${o.rain ?? '—'}</td><td>${o.hot ?? '—'}</td><td>${o.soil ?? '—'}</td><td>${o.solar?.toFixed(2) ?? '—'}</td></tr>`;
-  $('#advYears').innerHTML = `<table class="tbl"><thead><tr><th>Year</th><th>Mean temp °C</th><th>Rain mm</th><th>Days ≥ ${A.hotBase} °C</th><th>Soil m³/m³</th><th>Solar kWh/m²/d</th></tr></thead><tbody>${r}${row('Avg ' + per(A).baseLabel, A.base)}${row('Avg ' + per(A).curLabel, A.cur)}</tbody></table>`;
-  if(A.proj){
-    const names = Object.keys(A.proj.models);
-    $('#advModels').innerHTML = `<table class="tbl"><thead><tr><th>Year</th>${names.map(n => `<th>${n.replace(/_/g,' ')}</th>`).join('')}<th>Low</th><th>Mean</th><th>High</th></tr></thead><tbody>${per(A).projYears.map((y,i) => `<tr><td>${y}</td>${names.map(n => `<td>${A.proj.models[n][i]?.toFixed(2) ?? '—'}</td>`).join('')}<td>${A.proj.low[i].toFixed(2)}</td><td>${A.proj.mean[i].toFixed(2)}</td><td>${A.proj.high[i].toFixed(2)}</td></tr>`).join('')}</tbody></table><p>Each CMIP6 HighResMIP model is bias-adjusted with the delta method: projected = ERA5 baseline (${per(A).baseLabel}) + the model's change relative to its own ${per(A).baseLabel} mean. A scenario projection, not a weather forecast.</p>`;
-  } else $('#advModels').innerHTML = `<div class="empty">${per(A).proj ? 'CMIP6 projections were unavailable for this point.' : `Projections are only shown when the study period ends in ${LAST_YEAR}. This period ends in ${per(A).end}.`}</div>`;
+function renderAdvancedTables(){
+  const A = S.A, H = S.H;
+  const hasHot = A.years.some(y => y.hot != null), hotTd = v => hasHot ? `<td>${v ?? '—'}</td>` : '';
+  const r = A.years.map(y => `<tr><td>${y.year}</td><td>${y.temp?.toFixed(2) ?? '—'}</td><td>${y.rain ?? '—'}</td>${hotTd(y.hot)}<td>${y.soil ?? '—'}</td><td>${y.solar?.toFixed(2) ?? '—'}</td></tr>`).join('');
+  const row = (lbl, o) => `<tr class="avg"><td>${lbl}</td><td>${o.temp?.toFixed(2) ?? '—'}</td><td>${o.rain ?? '—'}</td>${hotTd(o.hot)}<td>${o.soil ?? '—'}</td><td>${o.solar?.toFixed(2) ?? '—'}</td></tr>`;
+  $('#advYears').innerHTML = `<table class="tbl"><thead><tr><th>Year</th><th>Mean temp °C</th><th>Rain mm${A.nasa ? ' (GPM IMERG)' : ''}</th>${hasHot ? `<th>Days ≥ ${A.hotBase} °C</th>` : ''}<th>Soil m³/m³</th><th>Solar kWh/m²/d</th></tr></thead><tbody>${r}${row('Avg ' + per(A).baseLabel, A.base)}${row('Avg ' + per(A).curLabel, A.cur)}</tbody></table>`;
   const towers = HAZARDS.map(h => `<tr><td>${h.code} ${h.name}</td><td><span class="lvl lvl-${H[h.id].level}">${LEVEL[H[h.id].level][0]}</span></td><td>${H[h.id].score}</td><td class="l">${esc(H[h.id].headline)}</td></tr>`).join('');
   const quakes = A.quakes ? (A.quakes.list.length ? A.quakes.list.slice(0, 12).map(e => `<tr><td>${new Date(e.time).toISOString().slice(0,10)}</td><td>M${e.mag.toFixed(1)}</td><td class="l">${esc(e.place || 'Unknown')}</td><td>${e.dist} km</td></tr>`).join('') : '') : '';
   $('#advHaz').innerHTML = `<table class="tbl"><thead><tr><th>Tower</th><th>Level</th><th>Score</th><th class="l">Finding</th></tr></thead><tbody>${towers}</tbody></table>
@@ -828,136 +671,6 @@ function renderAdvanced(){
   $('#advExport').innerHTML = `<div class="btn-row"><button class="btn-primary" data-act="report-quick">${ic('file')}Save as report</button><button class="btn-secondary" data-act="csv">${ic('download')}Download CSV</button></div>
     <p>Sources: ${A.nasa ? 'NASA POWER (MERRA-2 / CERES) monthly data; NASA GPM IMERG V07 rainfall; NASA EONET events (storms, floods, landslides, volcanoes; notable events only); NASA MERRA-2 aerosols (air quality, PM2.5); NASA-SSH sea level; USGS Earthquake Catalog; Esri World Imagery Wayback. Grid values (~50 km) can differ from station records.' : 'ERA5 reanalysis (ECMWF / Copernicus) and CMIP6 via Open-Meteo; USGS Earthquake Catalog; Copernicus DEM; CAMS air quality; Esri World Imagery Wayback. Grid values (~25 km) can differ from station records.'} Screening rules are simple thresholds, not an official assessment.</p>`;
 }
-
-/* Playful: quizzes and games */
-const XP_LEVELS = [['Rookie Explorer', 0], ['Weather Detective', 100], ['Climate Ranger', 250], ['Planet Guardian', 500]];
-const xpData = () => store.get(uKey('xp'), {xp:0, done:{}});
-function levelInfo(xp){ let i = 0; XP_LEVELS.forEach((l, k) => { if(xp >= l[1]) i = k; }); const nx = XP_LEVELS[i + 1]; return {i, level:i + 1, title:XP_LEVELS[i][0], from:XP_LEVELS[i][1], to:nx ? nx[1] : null}; }
-function addXp(n, key){
-  const d = xpData(); if(key){ if(d.done[key]) return 0; d.done[key] = 1; }
-  d.xp += n; store.set(uKey('xp'), d); renderQuest(); return n;
-}
-function renderQuest(){
-  const d = xpData(), L = levelInfo(d.xp), pctv = L.to ? Math.round((d.xp - L.from) / (L.to - L.from) * 100) : 100;
-  $('#qLevelTag').textContent = `Level ${L.level}`;
-  $('#questBody').innerHTML = `<div class="q-top"><span class="q-badge">${ic('trophy')}</span><div><p class="q-title">${L.title}</p><p class="q-sub">${d.xp} XP${L.to ? ` · ${L.to - d.xp} XP to the next rank` : ' · top rank reached'}</p></div></div><div class="meter meter-xp" role="img" aria-label="${pctv}% to next level"><span style="width:${pctv}%"></span></div><p class="q-hint">Earn XP by taking the quiz and guessing the future. XP counts once per place, so explore somewhere new for more.</p>`;
-}
-function funTiles(A, I){
-  const n = S.loc.short, tiles = [];
-  const dT = I.dT;
-  if(dT != null) tiles.push({icon:'thermo', big:dT >= 0.3 ? 'Warmer' : dT <= -0.3 ? 'Cooler' : 'Steady', line:dT >= 0.6 ? 'Ice cream here has officially become a drink.' : dT >= 0.3 ? 'Ice cream melts a bit faster than it used to.' : dT <= -0.3 ? 'Penguins nod approvingly.' : 'The planet\'s thermostat is staying chill.', tone:dT >= 0.3 ? 'warn' : 'good'});
-  if(I.dRain != null) tiles.push({icon:'drop', big:I.dRain >= 10 ? 'Wetter' : I.dRain <= -10 ? 'Drier' : 'Same rain', line:I.dRain >= 10 ? 'Umbrellas are working overtime.' : I.dRain <= -10 ? 'The plants are sending polite complaints.' : 'Umbrellas keep their normal hours.', tone:I.dRain <= -10 || I.dRain >= 20 ? 'warn' : 'good'});
-  tiles.push({icon:'wind', big:!A.aq ? 'Unknown' : A.aq.pm25 <= 15 ? 'Clean air' : A.aq.pm25 <= 35 ? 'A bit hazy' : 'Smoggy', line:!A.aq ? 'Our air sensors took a nap.' : A.aq.pm25 <= 15 ? 'Lungs say thank you.' : A.aq.pm25 <= 35 ? 'Maybe skip the marathon today.' : 'Masks are in fashion.', tone:!A.aq || A.aq.pm25 <= 15 ? 'good' : 'warn'});
-  const sol = A.cur.solar ?? A.base.solar;
-  tiles.push({icon:'sun', big:sol == null ? 'Unknown' : sol >= 5 ? 'Super sunny' : sol >= 4 ? 'Pretty sunny' : 'Gentle sun', line:sol == null ? 'The sun is being shy.' : sol >= 5 ? 'Solar panels work double shifts.' : sol >= 4 ? 'Solar panels are happy.' : 'Solar panels take lots of tea breaks.', tone:'good'});
-  tiles.push({icon:'quake', big:!A.quakes ? 'Unknown' : A.quakes.count === 0 ? 'Calm ground' : `${A.quakes.count} wiggles`, line:!A.quakes ? 'The ground is keeping secrets.' : A.quakes.count === 0 ? 'No big shakes in this period.' : `Earthquakes of M4+ near ${n} in ${per(A).label}. Earth likes to stretch.`, tone:A.quakes && A.quakes.count >= 10 ? 'warn' : 'good'});
-  return tiles;
-}
-const Q = {qs:[], i:0, score:0, locked:false, key:null};
-function buildQuiz(A, I){
-  const n = S.loc.short, qs = [];
-  if(I.dT != null){ const a = I.dT >= 0.2 ? 'warm' : I.dT <= -0.2 ? 'cool' : 'same'; qs.push({t:`Is ${n} warmer or cooler now than in ${per(A).baseLabel}?`, o:[['warm','Warmer'],['cool','Cooler'],['same','About the same']], a, ok:`Yes! It changed by ${sgn(I.dT)} °C. Thermometers noticed.`, no:`Close, but the data says ${sgn(I.dT)} °C. Thermometers do not lie.`}); }
-  if(I.dRain != null){ const a = I.dRain >= 5 ? 'more' : I.dRain <= -5 ? 'less' : 'same'; qs.push({t:`Compared with before, does it rain more or less each year in ${n}?`, o:[['more','More rain'],['less','Less rain'],['same','About the same']], a, ok:`Correct! Rain changed by ${sgn(I.dRain,0)}%. Clouds are impressed.`, no:`Nope, rain changed by ${sgn(I.dRain,0)}%. The clouds are laughing.`}); }
-  const hot = A.years.filter(y => y.temp != null).sort((x, y) => y.temp - x.temp)[0];
-  if(hot){ const yrs = [...new Set([hot.year, ...per(A).years].filter(y => y !== hot.year).slice(0, 3).concat(hot.year))].sort(); qs.push({t:`Which year was the hottest in ${n} between ${per(A).start} and ${per(A).end}?`, o:yrs.map(y => [String(y), String(y)]), a:String(hot.year), ok:`Right! ${hot.year} averaged ${hot.temp.toFixed(1)} °C.`, no:`It was ${hot.year}, at ${hot.temp.toFixed(1)} °C. Sunscreen would have helped.`}); }
-  if(A.quakes){ const c = A.quakes.count, a = c === 0 ? 'none' : c < 10 ? 'few' : 'many'; qs.push({t:`How many earthquakes of M4+ happened within ${A.radiusKm} km in ${per(A).label}?`, o:[['none','None'],['few','1 to 9'],['many','10 or more']], a, ok:`Spot on: ${c}. Your instincts are seismic.`, no:`It was ${c}. The ground has been busier (or calmer) than you guessed.`}); }
-  if(A.aq){ const p = A.aq.pm25, a = p <= 15 ? 'clean' : p <= 35 ? 'mid' : 'dusty'; qs.push({t:`How is the air in ${n}? (fine particles, PM2.5)`, o:[['clean','Clean'],['mid','A bit hazy'],['dusty','Very polluted']], a, ok:`Yes! ${p} µg/m³. Lungs approve this message.`, no:`It is ${p} µg/m³, so the answer differs from your guess. Air is sneaky.`}); }
-  return qs.slice(0, 5);
-}
-function resetQuiz(){ Object.assign(Q, {qs:buildQuiz(S.A, S.I), i:0, score:0, locked:false, key:`${S.loc.id}:quiz`}); renderQuiz(); }
-function renderQuiz(){
-  const body = $('#quizBody'); if(!Q.qs.length){ body.innerHTML = '<div class="empty">Not enough data to make a quiz for this place.</div>'; $('#quizMeta').textContent = ''; return; }
-  if(Q.i >= Q.qs.length){
-    const perfect = Q.score === Q.qs.length;
-    const bonus = perfect ? addXp(20, Q.key + ':perfect') : 0;
-    $('#quizMeta').textContent = '';
-    body.innerHTML = `<div class="quiz-end"><span class="q-badge big">${ic(perfect ? 'trophy' : 'star')}</span><h3>${perfect ? 'Perfect score!' : `You got ${Q.score} out of ${Q.qs.length}`}</h3><p>${perfect ? 'You read this place like a pro. Bonus XP unlocked.' : 'Not bad for a human! Try again to beat your score.'}</p><button class="btn-primary" data-act="quiz-again">${ic('refresh')}Play again</button></div>`; return;
-  }
-  const q = Q.qs[Q.i]; $('#quizMeta').innerHTML = `<span class="tag">Question ${Q.i + 1} of ${Q.qs.length}</span><span class="tag mint">${Q.score} correct</span>`;
-  body.innerHTML = `<p class="quiz-q">${esc(q.t)}</p><div class="quiz-opts">${q.o.map(o => `<button class="quiz-opt" data-act="quiz-pick" data-k="${esc(o[0])}">${esc(o[1])}</button>`).join('')}</div><div class="quiz-fb" id="quizFb" aria-live="polite"></div>`;
-}
-function quizPick(k, btn){
-  if(Q.locked) return; Q.locked = true; const q = Q.qs[Q.i], right = k === q.a;
-  $$('#quizBody .quiz-opt').forEach(b => { b.disabled = true; if(b.dataset.k === q.a) b.classList.add('right'); else if(b === btn) b.classList.add('wrong'); });
-  if(right){ Q.score++; addXp(20, `${Q.key}:${Q.i}`); }
-  $('#quizFb').innerHTML = `<p class="${right ? 'ok' : 'no'}">${ic(right ? 'check' : 'alert')}<span>${esc(right ? q.ok : q.no)}</span></p><button class="btn-primary" data-act="quiz-next">${Q.i + 1 >= Q.qs.length ? 'See my score' : 'Next question'}</button>`;
-  $('#quizMeta').innerHTML = `<span class="tag">Question ${Q.i + 1} of ${Q.qs.length}</span><span class="tag mint">${Q.score} correct</span>`;
-}
-const G = {done:false};
-function renderGuess(){
-  const A = S.A, el = $('#guessBody'); G.done = false;
-  if(!A.proj || A.cur.temp == null){ el.innerHTML = '<div class="empty">Future models are not available for this place.</div>'; return; }
-  const c = A.cur.temp, min = Math.floor((c - 1) * 2) / 2, max = Math.ceil((c + 3) * 2) / 2;
-  el.innerHTML = `<p class="quiz-q">What will the average yearly temperature in ${esc(S.loc.short)} be in ${per(A).projYears[4]}?</p><p class="muted">Right now (${per(A).curLabel}) it is ${c.toFixed(1)} °C.</p>
-    <div class="guess-row"><input id="guessRange" type="range" min="${min}" max="${max}" step="0.1" value="${(c + 0.6).toFixed(1)}" aria-label="Your guess in °C"><output id="guessOut" class="guess-out">${(c + 0.6).toFixed(1)} °C</output></div>
-    <button class="btn-primary" data-act="guess-lock">${ic('bolt')}Lock in my guess</button><div class="quiz-fb" id="guessFb" aria-live="polite"></div>`;
-  $('#guessRange').addEventListener('input', e => { $('#guessOut').textContent = (+e.target.value).toFixed(1) + ' °C'; });
-}
-function guessLock(){
-  if(G.done) return; G.done = true; const A = S.A, g = +$('#guessRange').value, t = A.proj.mean[4], diff = Math.abs(g - t);
-  const [xp, word, joke] = diff <= 0.3 ? [30, 'Bullseye', 'You might be a climate model in disguise.'] : diff <= 0.8 ? [15, 'Close', 'Not bad. The models were within shouting distance.'] : [5, 'Not quite', 'The future is tricky. That is why scientists use four models.'];
-  const got = addXp(xp, `${S.loc.id}:guess`);
-  $('#guessRange').disabled = true; $$('[data-act="guess-lock"]').forEach(b => b.disabled = true);
-  $('#guessFb').innerHTML = `<p class="${diff <= 0.8 ? 'ok' : 'no'}">${ic(diff <= 0.8 ? 'check' : 'alert')}<span><b>${word}!</b> The models expect about <b>${t.toFixed(1)} °C</b> (range ${A.proj.low[4].toFixed(1)} to ${A.proj.high[4].toFixed(1)}). You guessed ${g.toFixed(1)} °C. ${joke}${got ? ` +${got} XP` : ' XP already earned for this place.'}</span></p>`;
-}
-function renderPlayful(){
-  renderQuest();
-  $('#funGrid').innerHTML = funTiles(S.A, S.I).map(t => `<div class="fun-tile tone-${t.tone}"><span class="fun-ic">${ic(t.icon)}</span><b>${esc(t.big)}</b><p>${esc(t.line)}</p></div>`).join('');
-  resetQuiz(); renderGuess();
-}
-
-let chartGeom = null;
-function renderChart(){
-  const A = S.A, wrap = $('#chartWrap'), svg = $('#chart'); if(!A) return;
-  const pd = per(A), OBS_YEARS = pd.years, PROJ_YEARS = pd.projYears, LO = OBS_YEARS[OBS_YEARS.length-1];
-  const W = wrap.clientWidth, H = wrap.clientHeight; if(W < 80 || H < 60) return;
-  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  const xs = A.proj ? [...OBS_YEARS, ...PROJ_YEARS] : OBS_YEARS;
-  const obs = A.years.map(r => r.temp);
-  const vals = [...obs, A.cur.temp, ...(A.proj ? [...A.proj.low, ...A.proj.high] : [])].filter(v => v != null);
-  const lo = Math.floor((Math.min(...vals) - 0.15)*2)/2, hi = Math.ceil((Math.max(...vals) + 0.15)*2)/2, step = (hi - lo) > 3 ? 1 : 0.5;
-  const L = 40, R = 96, T = 12, B = 22, n = xs.length;
-  const X = y => L + (y - xs[0]) * (W - L - R) / (n - 1), Y = v => T + (hi - v) / (hi - lo) * (H - T - B);
-  let g = '';
-  for(let t = lo; t <= hi + 1e-9; t += step) g += `<line x1="${L}" x2="${W-R+8}" y1="${Y(t)}" y2="${Y(t)}"/><text x="${L-7}" y="${Y(t)+4}" text-anchor="end">${t.toFixed(step < 1 ? 1 : 0)}°</text>`;
-  const every = (W - L - R) / n < 34 ? 2 : 1;
-  xs.forEach((y, i) => { if(i === n-1 || (i % every === 0 && !(every > 1 && i === n-2))) g += `<text x="${X(y)}" y="${H-5}" text-anchor="middle">${y}</text>`; });
-  if(A.proj) g += `<line class="divider" x1="${(X(LO)+X(PROJ_YEARS[0]))/2}" x2="${(X(LO)+X(PROJ_YEARS[0]))/2}" y1="${T}" y2="${H-B}"/>`;
-  $('#fcGrid').innerHTML = g;
-  $('#fcRef').innerHTML = '';
-  const pts = (ys, arr) => ys.map((y,i) => arr[i] == null ? null : `${X(y).toFixed(1)} ${Y(arr[i]).toFixed(1)}`).filter(Boolean);
-  $('#obsLine').setAttribute('d', 'M' + pts(OBS_YEARS, obs).join(' L'));
-  const k = S.scenario, col = {low:'#36E2B1', mean:'#22D3EE', high:'#FFBE55'}[k];
-  const lastObs = obs[obs.length-1];
-  const labels = [];
-  let dots = OBS_YEARS.map((y,i) => obs[i] == null ? '' : `<circle class="dot" r="4" cx="${X(y)}" cy="${Y(obs[i])}" style="fill:#cfe3ef"/>`).join('');
-  labels.push(`<text class="lbl" x="${X(OBS_YEARS[0])}" y="${Math.max(T+10, Y(Math.max(...obs.filter(v=>v!=null))) - 10)}">${A.nasa ? 'NASA POWER' : 'ERA5'} observed</text>`);
-  if(A.proj){
-    const band = `M${X(LO)} ${Y(lastObs)} ` + PROJ_YEARS.map((y,i) => `L${X(y)} ${Y(A.proj.high[i])}`).join(' ') + ' ' + [...PROJ_YEARS].reverse().map((y,i) => `L${X(y)} ${Y(A.proj.low[4-i])}`).join(' ') + ' Z';
-    $('#fcBand').setAttribute('d', band);
-    const line = `M${X(LO).toFixed(1)} ${Y(lastObs).toFixed(1)} L` + pts(PROJ_YEARS, A.proj[k]).join(' L');
-    const ln = $('#fcLine'); ln.style.d = `path("${line}")`; ln.style.stroke = col;
-    dots += PROJ_YEARS.map((y,i) => `<circle class="dot" r="4.5" cx="${X(y)}" cy="${Y(A.proj[k][i])}" style="fill:${col}"/>`).join('');
-    const name = {low:'Model low', mean:'Ensemble mean', high:'Model high'}[k];
-    labels.push(`<text class="lbl" x="${X(PROJ_YEARS[4])+9}" y="${Y(A.proj[k][4])+4}">${A.proj[k][4].toFixed(1)} °C</text><text x="${X(PROJ_YEARS[4])+9}" y="${Y(A.proj[k][4])+18}">${name}</text>`);
-  } else { $('#fcBand').removeAttribute('d'); $('#fcLine').style.d = 'none'; }
-  $('#fcDots').innerHTML = dots; $('#fcLabels').innerHTML = labels.join('');
-  const hit = $('#fcHit'); hit.setAttribute('x', L); hit.setAttribute('y', T); hit.setAttribute('width', Math.max(0, W-L-R+8)); hit.setAttribute('height', Math.max(0, H-T-B));
-  chartGeom = {X, Y, xs, T, B, H, L, W, R};
-}
-function chartHover(e){
-  if(!chartGeom || !S.A) return; const {X, Y, xs, T, H, B, L, W, R} = chartGeom, A = S.A, pd = per(S.A), OBS_YEARS = pd.years, PROJ_YEARS = pd.projYears, rect = $('#chartWrap').getBoundingClientRect();
-  const i = Math.max(0, Math.min(xs.length-1, Math.round((e.clientX - rect.left - L) / ((W-L-R)/(xs.length-1))))), yr = xs[i];
-  const oi = OBS_YEARS.indexOf(yr), pi = PROJ_YEARS.indexOf(yr);
-  const v = oi >= 0 ? A.years[oi].temp : A.proj[S.scenario][pi]; if(v == null) return;
-  const xh = $('#fcXh'); xh.setAttribute('x1', X(yr)); xh.setAttribute('x2', X(yr)); xh.setAttribute('y1', T); xh.setAttribute('y2', H-B); xh.style.opacity = .8;
-  const tip = $('#fcTip'); tip.style.left = X(yr)+'px'; tip.style.top = (Y(v)-6)+'px'; tip.style.opacity = 1;
-  tip.innerHTML = oi >= 0 ? `<span>${yr} · ${S.A?.nasa ? 'NASA POWER' : 'ERA5'} observed</span><br><b>${v.toFixed(2)} °C</b>` : `<span>${yr} · CMIP6 ${S.scenario === 'mean' ? 'ensemble mean' : 'model '+S.scenario}</span><br><b>${v.toFixed(2)} °C</b> <span>range ${A.proj.low[pi].toFixed(1)}–${A.proj.high[pi].toFixed(1)}</span>`;
-}
-$('#fcHit').addEventListener('pointermove', chartHover);
-$('#fcHit').addEventListener('pointerleave', () => { $('#fcTip').style.opacity = 0; $('#fcXh').style.opacity = 0; });
-$$('.scen-btn').forEach(b => b.addEventListener('click', () => { S.scenario = b.dataset.s; $$('.scen-btn').forEach(x => x.setAttribute('aria-pressed', x === b)); renderChart(); announce(`${b.querySelector('.nm').textContent} shown.`); }));
-
 
 /* ---------- scan target (dashboard stage) ---------- */
 function renderInset(){
@@ -991,13 +704,12 @@ $('#presets').addEventListener('click', e => { const b = e.target.closest('butto
 const findLoc = id => [S.loc, ...PRESETS, ...favs(), ...recents()].find(x => x && x.id === id);
 
 /* ---------- pages ---------- */
-const PAGE_LABEL = {dashboard:'the dashboard', projects:'Projects', risk:'Risk Monitoring', compare:'Compare places', reports:'Reports', plans:'Plans', profile:'your profile'};
+
 function setPage(p){
   S.page = p; document.body.dataset.page = p;
   $$('.topnav [data-nav]').forEach(b => b.toggleAttribute('aria-current', b.dataset.nav === p));
   $$('.topnav [aria-current]').forEach(b => b.setAttribute('aria-current', 'page'));
-  closeUserPop();
-  requestAnimationFrame(() => { sizeGlobe(); refreshMosaics(); renderChart(); });
+  requestAnimationFrame(() => { sizeGlobe(); refreshMosaics(); });
 }
 function goHome(){
   S.token++; S.riskTok++; setPage('home');
@@ -1006,7 +718,6 @@ function goHome(){
 }
 function go(p){
   if(p === 'home') return goHome();
-  if(!S.user){ openAuth('login', `Log in to open ${PAGE_LABEL[p]}.`); return; }
   if(p === 'dashboard'){
     if(S.A){ setPage('dashboard'); if(S.state !== 'scanning') showResults(); return; }
     const r = recents()[0];
@@ -1014,7 +725,7 @@ function go(p){
     toast('Pick a region on the globe and press Scan Area first.'); goHome(); return;
   }
   S.riskTok++; setPage(p);
-  if(p === 'projects') renderProjects(); else if(p === 'risk') renderRisk(); else if(p === 'reports') renderReports(); else if(p === 'compare') renderCompare(); else if(p === 'plans') renderPlans(); else if(p === 'profile') renderProfile();
+  if(p === 'projects') renderProjects(); else if(p === 'risk') renderRisk(); else if(p === 'reports') renderReports(); else if(p === 'compare') renderCompare();
 }
 
 /* ---------- flow ---------- */
@@ -1033,11 +744,7 @@ async function selectPoint(lat, lon){
   if(S.loc.id !== l.id) return;
   S.loc = {...S.loc, ...(r || {name:`Custom Area (${fmtLat(lat)}, ${fmtLon(lon)})`, short:'Custom Area'})}; fillLocation();
 }
-/* Home -> Scan: ask for an account first */
-function requestScan(){
-  if(!S.user){ S.pending = {loc:S.loc, radius:+$('#radius').value}; openAuth('register', `Create a free account to scan ${S.loc.short}.`); return; }
-  scan();
-}
+function requestScan(){ scan(); }
 /* ---------- study period controls ---------- */
 const YEAR_MIN = 2000;
 function fillYears(sel, from, to, val){ sel.innerHTML = yrs(from, to).map(y => `<option>${y}</option>`).join(''); sel.value = String(val); }
@@ -1099,7 +806,7 @@ function showResults(){
   S.loc = S.A.loc; fillLocation(); syncScanCtl(); renderDashboard(); renderInset(); setState('results');
   $('#stExplain').textContent = 'Scan complete. Switch views above, or open Risk Monitoring to see one tower per natural hazard.';
   $('#sbChip').className = 'chip ok';
-  setTimeout(() => { refreshMosaics(); renderChart(); }, 950);
+  setTimeout(refreshMosaics, 950);
   announce(`Results ready for ${S.loc.name}.`);
 }
 
@@ -1123,84 +830,77 @@ function renderProjects(){
 }
 
 /* ---------- reports ---------- */
-/* Saved reports live in the server database (users.db), one set per account, so they follow the account across log out, log in and devices. */
-const RP = {list:[], tok:null, full:{}, err:''};
+/* No accounts: each visit gets an anonymous session on the server (reports.py). Reports stay while the site is open
+ * (a ping every minute) and for 15 minutes after the last ping, so closing the tab by mistake loses nothing.
+ * Saving the same place, period and sections twice keeps one report. */
+const RP = {sid:null, list:[], full:{}, err:'', ready:null};
+const SID_KEY = 'es:visit';
 const reportsOf = () => RP.list;
-async function sha256Key(text){
-  try{ const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)); return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2,'0')).join(''); }
-  catch{ /* plain-http pages have no crypto.subtle: tiny pure-JS SHA-256 */
-    const K = [], H = [], W = new Array(64), r = (x, n) => (x >>> n) | (x << (32 - n)); let pc = 0, c = 2;
-    for(; pc < 64; c++){ let ok = true; for(let d = 2; d * d <= c; d++) if(c % d === 0){ ok = false; break; } if(ok){ if(pc < 8) H[pc] = (Math.pow(c, .5) * 4294967296) | 0; K[pc++] = (Math.pow(c, 1/3) * 4294967296) | 0; } }
-    const bytes = [...unescape(encodeURIComponent(text))].map(ch => ch.charCodeAt(0)), L = bytes.length * 8; bytes.push(0x80); while(bytes.length % 64 !== 56) bytes.push(0);
-    for(let i = 7; i >= 0; i--) bytes.push(i > 3 ? 0 : (L >>> (i * 8)) & 255);
-    for(let o = 0; o < bytes.length; o += 64){
-      for(let i = 0; i < 16; i++) W[i] = (bytes[o+4*i] << 24) | (bytes[o+4*i+1] << 16) | (bytes[o+4*i+2] << 8) | bytes[o+4*i+3];
-      for(let i = 16; i < 64; i++){ const a = W[i-15], b = W[i-2]; W[i] = (W[i-16] + (r(a,7) ^ r(a,18) ^ (a >>> 3)) + W[i-7] + (r(b,17) ^ r(b,19) ^ (b >>> 10))) | 0; }
-      let [a,b,cc,d,e,f,g,h] = H;
-      for(let i = 0; i < 64; i++){ const t1 = (h + (r(e,6) ^ r(e,11) ^ r(e,25)) + ((e & f) ^ (~e & g)) + K[i] + W[i]) | 0, t2 = ((r(a,2) ^ r(a,13) ^ r(a,22)) + ((a & b) ^ (a & cc) ^ (b & cc))) | 0; h = g; g = f; f = e; e = (d + t1) | 0; d = cc; cc = b; b = a; a = (t1 + t2) | 0; }
-      [a,b,cc,d,e,f,g,h].forEach((v, i) => H[i] = (H[i] + v) | 0);
-    }
-    return H.map(x => (x >>> 0).toString(16).padStart(8, '0')).join('');
-  }
-}
-async function acctApi(method, path, body, tok = RP.tok){
-  const r = await fetch(apiBase() + path, {method, headers:{'Content-Type':'application/json', ...(tok ? {Authorization:'Bearer ' + tok} : {})}, body:body ? JSON.stringify(body) : undefined});
-  if(!r.ok){ const e = new Error(`HTTP ${r.status}`); e.status = r.status; throw e; }
+async function sessApi(method, path, body){
+  const r = await fetch(apiBase() + path, {method, headers:{'Content-Type':'application/json'}, body:body ? JSON.stringify(body) : undefined});
+  if(!r.ok){ const e = new Error(`HTTP ${r.status}`); e.status = r.status; try{ e.msg = (await r.json()).error; }catch{} throw e; }
   return r.json();
 }
-/* called after a successful log in or registration (we have the password here, the server only ever gets a derived key) */
-async function acctSignIn(email, password){
-  try{
-    const key = await sha256Key(`es-sync:${email.trim().toLowerCase()}:${password}`);
-    const {token} = await acctApi('POST', '/account/session', {email, key}, null);
-    RP.tok = token; store.set(uKey('tok'), token);
-  }catch(e){ RP.err = 'The report database could not be reached, so saved reports are unavailable right now.'; }
-  await loadReports();
+async function newSession(){ const {sid} = await sessApi('POST', '/session'); RP.sid = sid; store.set(SID_KEY, sid); RP.list = []; RP.full = {}; return sid; }
+/* reuse the visit stored in this browser if the server still has it (closed less than 15 minutes ago), else start a new one */
+function startSession(){
+  if(isStatic()) return (RP.ready = Promise.resolve(null));
+  return RP.ready = (async () => {
+    try{
+      const old = store.get(SID_KEY, null);
+      if(old){ try{ await sessApi('POST', `/session/${old}/ping`); RP.sid = old; await loadReports(); return old; }catch(e){ if(e.status !== 404) throw e; } }
+      return await newSession();
+    }catch{ RP.err = 'The report service could not be reached, so reports cannot be saved right now.'; return null; }
+  })();
 }
 async function loadReports(){
-  const uid = S.user && S.user.id; if(!uid) return;
-  if(!RP.tok){ RP.list = []; rerenderAccountPages(); return; }
-  try{
-    let {reports} = await acctApi('GET', '/account/reports');
-    const local = store.get(uKey('reports'), []);   // older reports kept in this browser move into the database once
-    if(local.length){ for(const r of local) { try{ await acctApi('POST', '/account/reports', {report:r}); }catch{} } store.set(uKey('reports'), []); ({reports} = await acctApi('GET', '/account/reports')); }
-    if(!S.user || S.user.id !== uid) return;
-    RP.list = reports; RP.err = '';
-  }catch(e){
-    if(e.status === 401){ RP.tok = null; store.set(uKey('tok'), null); RP.err = 'Your session with the report database expired. Log out and log in again to see your saved reports.'; }
-    else RP.err = 'The report database could not be reached, so saved reports are unavailable right now.';
-  }
-  rerenderAccountPages();
+  if(!RP.sid) return;
+  try{ RP.list = (await sessApi('GET', `/session/${RP.sid}/reports`)).reports; RP.err = ''; }
+  catch(e){ if(e.status === 404){ await newSession(); } else RP.err = 'The report service could not be reached.'; }
+  if(S.page === 'reports') renderReports();
 }
+async function pingSession(){
+  if(!RP.sid) return;
+  try{ await sessApi('POST', `/session/${RP.sid}/ping`); }
+  catch(e){ if(e.status === 404){ const had = RP.list.length; await newSession(); if(had){ toast('Your previous visit expired, so its reports were removed.'); if(S.page === 'reports') renderReports(); } } }
+}
+setInterval(pingSession, 60000);
+addEventListener('pagehide', () => { if(RP.sid) try{ navigator.sendBeacon(apiBase() + `/session/${RP.sid}/ping`); }catch{} });
+document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') pingSession(); });
 async function fullReport(id){
   if(RP.full[id]) return RP.full[id];
-  return RP.full[id] = await acctApi('GET', `/account/reports/${encodeURIComponent(id)}`);
+  return RP.full[id] = await sessApi('GET', `/session/${RP.sid}/reports/${encodeURIComponent(id)}`);
 }
-const SECTIONS = [['summary','Summary and indicators'],['years','Yearly climate record'],['projection','Outlook projection'],['towers','Risk tower results'],['hazards','Earthquake list']];
+const SECTIONS = [['summary','Summary and indicators'],['trends','Trend tests for every variable'],['years','Yearly climate record'],['towers','Risk tower results'],['hazards','Earthquake list']];
 function renderReports(){
   const reps = reportsOf(), has = !!S.A;
-  $('#pageReports').innerHTML = `<div class="page-in"><header class="page-h"><div><h1>${ic('file')}Reports</h1><p>Save the research you did as a report, then download it as a PDF or keep the data as CSV.</p></div></header>
+  $('#pageReports').innerHTML = `<div class="page-in"><header class="page-h"><div><h1>${ic('file')}Reports</h1><p>Save what you found as a report, then open it as a PDF or download the data as CSV. Reports are kept for this visit and for 15 minutes after you close the site. No account needed.</p></div></header>
     <div class="rep-new card">${has ? `<h2>${ic('plus')}New report from your current scan</h2>
       <div class="rep-form"><label>Title<input id="rpTitle" type="text" value="${esc(S.loc.short)} climate and hazard study"></label>
       <label>Notes <span>(optional)</span><textarea id="rpNotes" rows="3" placeholder="Your findings, questions, next steps…"></textarea></label>
       <fieldset><legend>Include</legend><div class="chips">${SECTIONS.map(s => `<label class="chk"><input type="checkbox" class="rp-sec" value="${s[0]}" checked><span>${s[1]}</span></label>`).join('')}</div></fieldset>
-      <div class="btn-row"><button class="btn-primary" data-act="report-save">${ic('check')}Save report</button><button class="btn-secondary" data-act="report-save-pdf">${ic('print')}Save and download PDF</button></div></div>`
+      <div class="btn-row"><button class="btn-primary" data-act="report-save">${ic('check')}Save report</button><button class="btn-secondary" data-act="report-save-pdf">${ic('print')}Save and open PDF</button></div></div>`
       : `<h2>${ic('plus')}New report</h2><p class="muted">Scan a region first. Your report is built from the scan results.</p><button class="btn-primary" data-act="go-home">${ic('pin')}Pick a region</button>`}</div>
     ${RP.err ? `<p class="rep-err">${esc(RP.err)}</p>` : ''}
-    <h2 class="sec-h">Saved reports (${reps.length})</h2>
+    <h2 class="sec-h">Saved in this visit (${reps.length})</h2>
     ${reps.length ? `<ul class="rep-list">${reps.map(r => `<li class="card rep-item"><span class="rep-ic">${ic('file')}</span><div class="grow"><b>${esc(r.title)}</b><span>${esc(r.loc.name)} · ${new Date(r.createdAt).toLocaleString()} · ${r.sections.length} section${r.sections.length === 1 ? '' : 's'}</span>${r.notes ? `<em>${esc(r.notes.slice(0, 140))}${r.notes.length > 140 ? '…' : ''}</em>` : ''}</div>
-      <div class="rep-actions"><button class="btn-ghost" data-act="report-view" data-id="${r.id}">${ic('eye')}Preview</button><button class="btn-primary" data-act="report-pdf" data-id="${r.id}">${ic('print')}PDF</button><button class="btn-ghost" data-act="report-csv" data-id="${r.id}">${ic('download')}CSV</button><button class="icon-btn" data-act="report-del" data-id="${r.id}" aria-label="Delete report ${esc(r.title)}">${ic('trash')}</button></div></li>`).join('')}</ul>`
-      : `<div class="empty-state">${ic('file')}<h3>No saved reports</h3><p>Reports you save will appear here so you can open them again later.</p></div>`}</div>`;
+      <div class="rep-actions"><button class="btn-ghost" data-act="report-view" data-id="${esc(r.id)}">${ic('eye')}Preview</button><button class="btn-primary" data-act="report-pdf" data-id="${esc(r.id)}">${ic('print')}PDF</button><button class="btn-ghost" data-act="report-csv" data-id="${esc(r.id)}">${ic('download')}CSV</button><button class="icon-btn" data-act="report-del" data-id="${esc(r.id)}" aria-label="Delete report ${esc(r.title)}">${ic('trash')}</button></div></li>`).join('')}</ul>`
+      : `<div class="empty-state">${ic('file')}<h3>No saved reports yet</h3><p>Reports you save during this visit appear here.</p></div>`}</div>`;
 }
 async function saveReport(title, notes, sections){
-  if(!canAdd('reports')){ upsell('reports'); return null; }
-  if(!RP.tok){ toast(RP.err || 'Reports could not be saved: not connected to the report database.'); return null; }
+  await RP.ready;
+  if(!RP.sid){ toast(RP.err || 'Reports cannot be saved right now.'); return null; }
   const rep = {id:'r' + Date.now().toString(36) + Math.random().toString(36).slice(2,5), title:title || `${S.loc.short} report`, notes:notes || '', sections, createdAt:Date.now(), view:S.view, loc:S.A.loc, A:S.A};
-  try{ await acctApi('POST', '/account/reports', {report:rep}); }
-  catch(e){ toast(e.status === 413 ? 'This report is too large to save.' : e.status === 401 ? 'Your session expired. Log out and log in again, then save the report.' : 'Could not reach the report database. The report was not saved.'); return null; }
+  let out;
+  try{ out = await sessApi('POST', `/session/${RP.sid}/reports`, {report:rep}); }
+  catch(e){
+    if(e.status === 404){ await newSession(); try{ out = await sessApi('POST', `/session/${RP.sid}/reports`, {report:rep}); }catch{ toast('Could not save the report.'); return null; } }
+    else { toast(e.status === 413 ? 'This report is too large to save.' : e.status === 409 ? (e.msg || 'Too many reports in this visit. Delete one first.') : 'Could not reach the report service. The report was not saved.'); return null; }
+  }
+  if(out.duplicate){ toast('This report is already saved: same place, period and sections.'); return RP.list.find(r => r.id === out.id) ? fullReport(out.id) : rep; }
   RP.full[rep.id] = rep;
   const {A, ...meta} = rep; RP.list = [meta, ...RP.list];
-  rerenderAccountPages();
+  if(S.page === 'reports') renderReports();
   return rep;
 }
 function csvText(A, loc){
@@ -1208,6 +908,9 @@ function csvText(A, loc){
     ['year','source','mean_temp_c','rain_mm','hot_days','soil_m3m3','solar_kwh_m2_day','model_low_c','ensemble_mean_c','model_high_c']];
   A.years.forEach(y => rows.push([y.year,A.nasa ? 'NASA POWER' : 'ERA5',y.temp,y.rain,y.hot,y.soil,y.solar,'','','']));
   if(A.proj) per(A).projYears.forEach((y,i) => rows.push([y,'CMIP6','','','','','',A.proj.low[i],A.proj.mean[i],A.proj.high[i]]));
+  const ms = A.nasa?.bundle?.series;
+  if(ms){ rows.push([], ['monthly NASA series'], ['month','t2m_c','t2m_max_c','precip_mm_per_day_power','imerg_mm_month','solar_kwh_m2_day','root_zone_wetness_0_1']);
+    ms.month.forEach((m, i) => rows.push([m, ms.t2m[i], ms.t2m_max?.[i], ms.prectotcorr?.[i], ms.imerg_mm?.[i], ms.allsky_sfc_sw_dwn?.[i] == null ? '' : +(ms.allsky_sfc_sw_dwn[i] / 3.6).toFixed(3), ms.gwetroot?.[i]])); }
   return rows.map(r => r.map(c => /[",\n]/.test(String(c ?? '')) ? `"${String(c).replace(/"/g,'""')}"` : (c ?? '')).join(',')).join('\n');
 }
 const slugOf = n => String(n).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'') || 'location';
@@ -1220,14 +923,15 @@ function reportHTML(rep, autoPrint){
   const tr = A.years.map(y => `<tr><td>${y.year}</td><td>${y.temp?.toFixed(2) ?? '—'}</td><td>${y.rain ?? '—'}</td><td>${y.hot ?? '—'}</td><td>${y.soil ?? '—'}</td><td>${y.solar?.toFixed(2) ?? '—'}</td></tr>`).join('');
   const pr = A.proj ? per(A).projYears.map((y,i) => `<tr><td>${y}</td><td>${A.proj.low[i].toFixed(2)}</td><td>${A.proj.mean[i].toFixed(2)}</td><td>${A.proj.high[i].toFixed(2)}</td></tr>`).join('') : '';
   const tw = HAZARDS.map(h => `<tr><td>${h.code} ${h.name}</td><td>${LEVEL[H[h.id].level][0]}</td><td style="text-align:left">${esc(H[h.id].headline)}</td></tr>`).join('');
-  const author = S.user ? `${esc(S.user.name)} (${esc(roleOf(S.user.role).label)})` : 'Earthanova user';
+  const trendRows = VARS.map(v => { const sr = dvSeries(A, v.id), vd = sr && dvVerdict(sr); return vd ? `<tr><td>${esc(v.name)}</td><td>${sr.years[0]}–${sr.years[sr.years.length - 1]}</td><td>${dvSgn(vd.t.slope * 10, v.dec + 1)} ${esc(v.unit)}</td><td>${pTxt(vd.t.p)}</td><td style="text-align:left">${esc(vd.word)}</td></tr>` : ''; }).join('');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${esc(rep.title)}</title><style>body{font:14px/1.5 Inter,system-ui,sans-serif;color:#0b1b2b;max-width:860px;margin:32px auto;padding:0 24px}h1{font:700 26px Sora,system-ui;margin:0}h2{font:600 17px Sora,system-ui;margin:26px 0 8px;border-bottom:2px solid #22D3EE;padding-bottom:4px}table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}td,th{border-bottom:1px solid #d6e2ea;padding:6px 8px;text-align:right}td:first-child,th:first-child{text-align:left}th{color:#45627a;font-weight:600}.muted{color:#45627a}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.box{border:1px solid #d6e2ea;border-radius:10px;padding:10px 12px}.box b{display:block;font-size:18px}ul{padding-left:18px}.notes{white-space:pre-wrap;background:#f1f7fa;border-radius:10px;padding:10px 12px}@media print{.noprint{display:none}}</style></head><body>
   <p class="noprint"><button onclick="print()">Print / Save as PDF</button></p>
-  <h1>${esc(rep.title)}</h1><p class="muted">${esc(loc.name)} · ${fmtLat(loc.lat)}, ${fmtLon(loc.lon)} · ${A.nasa ? 'NASA POWER' : 'ERA5'} grid ${A.grid.lat.toFixed(2)}, ${A.grid.lon.toFixed(2)} · elevation ${A.elev != null ? Math.round(A.elev) + ' m' : 'n/a'}<br>Prepared by ${author} on ${new Date(rep.createdAt).toLocaleDateString()} · data fetched ${d} UTC</p>
+  <h1>${esc(rep.title)}</h1><p class="muted">${esc(loc.name)} · ${fmtLat(loc.lat)}, ${fmtLon(loc.lon)} · ${A.nasa ? 'NASA POWER' : 'ERA5'} grid ${A.grid.lat.toFixed(2)}, ${A.grid.lon.toFixed(2)} · elevation ${A.elev != null ? Math.round(A.elev) + ' m' : 'n/a'}<br>Prepared with Earthanova on ${new Date(rep.createdAt).toLocaleDateString()} · data fetched ${d} UTC</p>
   ${rep.notes ? `<h2>Notes</h2><p class="notes">${esc(rep.notes)}</p>` : ''}
   ${has('summary') ? `<h2>Summary</h2><div class="grid"><div class="box">Temperature change<b>${sgn(I.dT)} °C</b><span class="muted">${per(A).baseLabel} → ${per(A).curLabel}</span></div><div class="box">Rainfall change<b>${I.dRain == null ? (I.dryRain ? 'Hyper-arid' : 'n/a') : sgn(I.dRain,0) + '%'}</b><span class="muted">${A.base.rain ?? '—'} → ${A.cur.rain ?? '—'} mm/yr</span></div><div class="box">Trend<b>${A.trend ? sgn(A.trend.slope,2) + ' °C/yr' : 'n/a'}</b><span class="muted">${A.trend ? (A.trend.sig ? 'significant (95%)' : 'not significant') : ''}</span></div></div>
     <h2>Indicators</h2><ul><li>Solar: ${esc(I.hi.solar[0])} (${esc(I.hi.solar[2])})</li><li>Climate: ${esc(I.hi.climate[0])} (${esc(I.hi.climate[2])})</li><li>Air quality: ${esc(I.hi.air[0])} (${esc(I.hi.air[2])})</li></ul>
     <h2>Screening flags</h2>${I.flags.length ? `<ul>${I.flags.map(f => `<li>${esc(f.t)}</li>`).join('')}</ul>` : '<p>No thresholds exceeded.</p>'}` : ''}
+  ${has('trends') && trendRows ? `<h2>Trend tests (Mann-Kendall with Sen's slope, whole NASA record)</h2><table><thead><tr><th>Variable</th><th>Years</th><th>Trend per decade</th><th>p-value</th><th style="text-align:left">Verdict</th></tr></thead><tbody>${trendRows}</tbody></table><p class="muted">A trend is called real when p &lt; 0.05: a pattern that steady would appear by chance less than 1 time in 20.</p>` : ''}
   ${has('towers') ? `<h2>Risk tower results</h2><table><thead><tr><th>Tower</th><th>Level</th><th style="text-align:left">Finding</th></tr></thead><tbody>${tw}</tbody></table>` : ''}
   ${has('years') ? `<h2>Yearly record (${A.nasa ? 'NASA POWER' : 'ERA5'})</h2><table><thead><tr><th>Year</th><th>Mean °C</th><th>Rain mm</th><th>Days ≥ ${A.hotBase} °C</th><th>Soil m³/m³</th><th>Solar kWh/m²/d</th></tr></thead><tbody>${tr}</tbody></table>` : ''}
   ${has('projection') && A.proj ? `<h2>Projection ${rng(per(A).projYears)} (CMIP6, bias-adjusted)</h2><table><thead><tr><th>Year</th><th>Model low</th><th>Ensemble mean</th><th>Model high</th></tr></thead><tbody>${pr}</tbody></table>` : ''}
@@ -1285,192 +989,8 @@ function showDialog({title, body = '', actions = []}){
   $('#dlg').hidden = false; document.body.classList.add('modal-open');
   const f = $('#dlg input, #dlg textarea'); if(f) setTimeout(() => f.focus(), 50);
 }
-function closeDialog(){ $('#dlg').hidden = true; if($('#auth').hidden) document.body.classList.remove('modal-open'); }
+function closeDialog(){ $('#dlg').hidden = true; document.body.classList.remove('modal-open'); }
 $('#dlg').addEventListener('mousedown', e => { if(e.target.id === 'dlg') closeDialog(); });
-
-/* ---------- plans & subscription ---------- */
-const PRICE_PRO = '$12';
-const PLANS = {
-  basic:{id:'basic', name:'Basic', price:'Free', per:'', blurb:'For curious people, students and first projects.', limits:{projects:3, reports:3},
-    feats:['Scan any place for any study period', 'Basic and Playful dashboards', 'Advanced analysis: free for 30 days with a trial', 'Risk Monitoring towers', 'Compare places before you travel', 'Up to 3 projects and 3 saved reports']},
-  pro:{id:'pro', name:'Pro', price:PRICE_PRO, per:'/ month', blurb:'For researchers, developers and working professionals.', limits:{projects:50, reports:50},
-    feats:['Everything in Basic', 'Advanced analysis dashboard (full statistics, model ensemble, exports)', 'Up to 50 projects', 'Up to 50 saved reports']},
-  org:{id:'org', name:'Organization', price:'Custom', per:'', contact:true, blurb:'For teams, institutes and companies.', limits:{projects:Infinity, reports:Infinity},
-    feats:['Everything in Pro', 'Unlimited projects and saved reports', 'Onboarding for your team', 'Plan set up and managed by our team: contact sales']}
-};
-const LIMIT_LABEL = {projects:'projects', reports:'saved reports'};
-const lim = v => v === Infinity ? 'Unlimited' : v;
-const subOf = () => store.get(uKey('sub'), null) || {plan:'basic', status:'active', since:S.user?.created || Date.now(), renews:null, history:[{at:Date.now(), plan:'basic', note:'Account created on the Basic plan'}]};
-/* free trial: every account can start one 30-day trial of Pro (demo only, nothing is charged). It unlocks Advanced analysis and Pro limits. */
-const TRIAL_DAYS = 30;
-const trialOf = () => { const t = subOf().trial; return t && t.endsAt > Date.now() ? t : null; };
-const trialUsed = () => !!subOf().trial;
-const trialDaysLeft = t => Math.max(1, Math.ceil((t.endsAt - Date.now()) / 864e5));
-const effPlan = () => { const id = subOf().plan; return id === 'basic' && trialOf() ? 'pro' : id; };
-const planOf = () => PLANS[effPlan()] || PLANS.basic;
-const hasAdvanced = () => !!S.user && effPlan() !== 'basic';
-function startTrial(){
-  if(!S.user){ openAuth('register', 'Create a free account to start your free trial.'); return; }
-  if(trialUsed()){ toast(trialOf() ? 'Your free trial is already running.' : 'Your free trial has already been used.'); return; }
-  const s = subOf(), now = Date.now();
-  s.trial = {startedAt:now, endsAt:now + TRIAL_DAYS*864e5};
-  s.history = [{at:now, plan:'trial', note:`Free trial started (${TRIAL_DAYS} days, ends ${dt(s.trial.endsAt)})`}, ...(s.history || [])].slice(0, 20);
-  store.set(uKey('sub'), s); renderPlanChip(); rerenderAccountPages();
-  toast(`Your ${TRIAL_DAYS}-day free trial has started. Advanced analysis is unlocked.`);
-  if(S.A) requestAnimationFrame(() => { renderChart(); refreshMosaics(); });
-}
-function trialDialog(){
-  const used = trialUsed();
-  showDialog({title:'Advanced analysis is locked', body:`<p>The Advanced view (full statistics, model ensemble, hazard catalogue and exports) is part of Pro. ${used ? 'Your free trial has ended, so upgrade to Pro to unlock it.' : 'Start your free trial for a month to unlock it, with Pro limits too. No card is needed in this demo.'}</p>`,
-    actions: used ? [{label:'Not now'}, {label:'Upgrade to Pro', cls:'btn-primary', fn:() => { setTimeout(proDialog, 0); }}] : [{label:'Not now'}, {label:'Start your free trial for a month', cls:'btn-primary', fn:() => { startTrial(); }}]});
-}
-function offerTrial(u){
-  showDialog({title:`Welcome, ${u.name.trim().split(/\s+/)[0]}`, body:`<p>Your account starts on the <b>Basic</b> plan (free).</p><p>As a new member you can start a <b>${TRIAL_DAYS}-day free trial</b>. It unlocks the Advanced analysis and the Pro limits. Start it now, or later from the Advanced button or your account menu.</p><p class="muted">Demo only: no card is asked for and nothing is charged.</p>`,
-    actions:[{label:'Maybe later'}, {label:'Start free trial', cls:'btn-primary', fn:() => { startTrial(); }}]});
-}
-/* lock the Advanced view on accounts without Pro or an active trial */
-function applyLocks(){
-  const locked = !hasAdvanced();
-  document.body.classList.toggle('adv-locked', locked);
-  $$('[data-setview="advanced"]').forEach(b => {
-    b.classList.toggle('is-locked', locked);
-    if(b.dataset.t0 == null) b.dataset.t0 = b.getAttribute('title') || '';
-    if(locked) b.setAttribute('title', 'Locked: start your free trial for a month'); else if(b.dataset.t0) b.setAttribute('title', b.dataset.t0); else b.removeAttribute('title');
-  });
-  $$('.cards>.card[data-views]').forEach(c => c.toggleAttribute('inert', locked && /advanced/.test(c.dataset.views) && !/basic/.test(c.dataset.views)));
-  const el = $('#advLock'); if(!el) return;
-  if(!locked){ el.innerHTML = ''; return; }
-  const used = trialUsed();
-  el.innerHTML = `<span class="adv-lock-ic">${ic('lock')}</span><div class="adv-lock-t"><h2>Advanced analysis is locked</h2><p>Full statistics, the yearly record, the CMIP6 model ensemble, the hazard catalogue and data export are part of Pro. ${used ? 'Your free trial has ended.' : 'Try everything free for a month. No card is needed in this demo.'}</p></div><div class="adv-lock-a">${used ? `<button class="btn-primary" data-act="plan-pro">${ic('star')}Upgrade to Pro</button>` : `<button class="btn-primary" data-act="trial-start">${ic('star')}Start your free trial for a month</button>`}<button class="btn-secondary" data-nav="plans">See plans</button></div>`;
-}
-const orgReq = () => store.get(uKey('orgreq'), null);
-function setPlan(plan, note){
-  const s = subOf(); s.plan = plan; s.status = 'active'; s.since = Date.now(); s.renews = plan === 'pro' ? Date.now() + 30*864e5 : null;
-  s.history = [{at:Date.now(), plan, note}, ...(s.history || [])].slice(0, 20); store.set(uKey('sub'), s); renderPlanChip();
-}
-function renderPlanChip(){
-  if(!S.user) return;
-  const t = trialOf();
-  $('#upPlan').textContent = t ? `Pro trial · ${trialDaysLeft(t)} d left` : `${planOf().name} plan`;
-  const up = $('#upTrial');
-  if(up) up.innerHTML = t ? `<p class="up-trial-note on">${ic('check')}<span>Free trial active until ${dt(t.endsAt)}</span></p>`
-    : effPlan() !== 'basic' ? '' : trialUsed() ? `<p class="up-trial-note">${ic('lock')}<span>Your free trial has ended.</span></p>`
-    : `<button class="up-trial-btn" data-act="trial-start">${ic('star')}Start your free trial</button><p class="up-trial-note">30 days of Advanced analysis and Pro limits. No card needed.</p>`;
-  applyLocks();
-}
-const usage = () => ({projects:favs().length, reports:reportsOf().length});
-const canAdd = kind => usage()[kind] < planOf().limits[kind];
-function upsell(kind){
-  const p = planOf();
-  showDialog({title:'Plan limit reached', body:`<p>Your ${p.name} plan includes up to ${lim(p.limits[kind])} ${LIMIT_LABEL[kind]}. Upgrade your plan to add more.</p>`, actions:[{label:'Not now'}, {label:'See plans', cls:'btn-primary', fn:() => { go('plans'); }}]});
-}
-function usageMeters(){
-  const u = usage(), p = planOf();
-  return Object.keys(LIMIT_LABEL).map(k => { const l = p.limits[k], pct = l === Infinity ? 8 : Math.min(100, Math.round(u[k] / l * 100)); return `<div class="use"><div class="use-h"><span>${LIMIT_LABEL[k][0].toUpperCase() + LIMIT_LABEL[k].slice(1)}</span><b>${u[k]} / ${lim(l)}</b></div><div class="meter"><span style="width:${pct}%;background:${pct >= 100 ? 'var(--amber)' : 'var(--cyan)'}"></span></div></div>`; }).join('');
-}
-function renderPlans(){
-  const cur = subOf().plan, req = orgReq(), tr = trialOf(), tu = trialUsed();
-  const trialBox = cur !== 'basic' ? '' : tr ? `<div class="trial-box on">${ic('check')}<div><b>Free trial active</b><span>${trialDaysLeft(tr)} day${trialDaysLeft(tr) > 1 ? 's' : ''} left (ends ${dt(tr.endsAt)}). Advanced analysis and Pro limits are unlocked.</span></div><button class="btn-primary" data-act="plan-pro">Keep Pro</button></div>`
-    : tu ? `<div class="trial-box">${ic('lock')}<div><b>Your free trial has ended</b><span>Upgrade to Pro to unlock the Advanced analysis again.</span></div><button class="btn-primary" data-act="plan-pro">Upgrade to Pro</button></div>`
-    : `<div class="trial-box">${ic('star')}<div><b>Try Pro free for 30 days</b><span>Unlock the Advanced analysis and the Pro limits. Demo only: no card needed.</span></div><button class="btn-primary" data-act="trial-start">Start your free trial for a month</button></div>`;
-  const card = p => {
-    const isCur = cur === p.id;
-    let cta;
-    if(p.id === 'basic') cta = isCur ? '<button class="btn-secondary" disabled>Current plan</button>' : '<button class="btn-secondary" data-act="plan-basic">Switch to Basic</button>';
-    else if(p.id === 'pro') cta = isCur ? '<button class="btn-secondary" disabled>Current plan</button>' : (cur === 'basic' && !trialUsed()) ? '<button class="btn-primary" data-act="trial-start">Start 30-day free trial</button><button class="btn-secondary" data-act="plan-pro">Upgrade to Pro</button>' : '<button class="btn-primary" data-act="plan-pro">Upgrade to Pro</button>';
-    else cta = isCur ? '<button class="btn-secondary" disabled>Current plan</button>' : `<button class="btn-primary" data-act="plan-org">${ic('mail')}${req ? 'Update contact request' : 'Contact sales'}</button>`;
-    return `<article class="plan${p.id === 'pro' ? ' plan-hot' : ''}${isCur ? ' plan-cur' : ''}">${p.id === 'pro' ? '<span class="plan-tag">Most popular</span>' : ''}${isCur ? '<span class="plan-tag cur">Your plan</span>' : ''}
-      <h3>${p.name}</h3><p class="plan-blurb">${p.blurb}</p><p class="plan-price"><b>${p.price}</b> <span>${p.per}</span></p>
-      <ul class="plan-feats">${p.feats.map(f => `<li>${ic('check')}<span>${f}</span></li>`).join('')}</ul>
-      ${p.id === 'org' && req ? `<p class="plan-note">${ic('mail')}Request sent ${ago(req.at)}. Our team will contact you at ${esc(req.email)}.</p>` : ''}
-      <div class="plan-cta">${cta}</div></article>`;
-  };
-  $('#pagePlans').innerHTML = `<div class="page-in"><header class="page-h"><div><h1>${ic('star')}Plans &amp; subscription</h1><p>Choose the plan that fits how you use Earthanova. Pro is self-service. The Organization plan is set up with our team: send us a request and we will get in touch.</p></div></header>
-    ${trialBox}
-    <div class="plan-grid">${Object.values(PLANS).map(card).join('')}</div>
-    <div class="card plan-use"><h2>${ic('bars')}Your usage on the ${planOf().name} plan</h2><div class="use-grid">${usageMeters()}</div></div>
-    <p class="muted foot">Prototype note: billing is simulated in this demo. No card is charged and no payment details are collected.</p></div>`;
-}
-function proDialog(){
-  showDialog({title:'Upgrade to Pro', body:`<p>Pro is ${PRICE_PRO} per month and includes up to 50 projects and 50 saved reports.</p><p class="muted">Demo billing: nothing is charged in this prototype. Activating Pro starts a 30-day subscription period you can track in your profile.</p>`,
-    actions:[{label:'Cancel'}, {label:'Activate Pro', cls:'btn-primary', fn:() => { setPlan('pro', `Upgraded to Pro (${PRICE_PRO}/month)`); toast('You are now on Pro.'); rerenderAccountPages(); }}]});
-}
-function orgDialog(){
-  const r = orgReq() || {}, u = S.user;
-  showDialog({title:'Contact sales: Organization plan', body:`<form class="form" id="orgForm" onsubmit="return false"><label>Organization<input id="orgName" type="text" value="${esc(r.org || '')}" placeholder="Institute, company or school"></label>
-    <label>Your name<input id="orgContact" type="text" value="${esc(r.name || u.name)}"></label><label>Work email<input id="orgEmail" type="email" value="${esc(r.email || u.email)}"></label>
-    <label>Team size<select id="orgSize">${['1–10','11–50','51–200','200+'].map(x => `<option${r.size === x ? ' selected' : ''}>${x}</option>`).join('')}</select></label>
-    <label>What do you need?<textarea id="orgMsg" rows="3" placeholder="Tell us about your team and use case">${esc(r.msg || '')}</textarea></label><p class="form-err" id="orgErr" role="alert"></p></form>`,
-    actions:[{label:'Cancel'}, {label:'Send request', cls:'btn-primary', fn:() => {
-      const v = id => $(id).value.trim();
-      if(!v('#orgName') || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v('#orgEmail'))){ $('#orgErr').textContent = 'Enter your organization and a valid email.'; return false; }
-      store.set(uKey('orgreq'), {org:v('#orgName'), name:v('#orgContact'), email:v('#orgEmail'), size:$('#orgSize').value, msg:v('#orgMsg'), at:Date.now(), status:'pending'});
-      toast('Request sent. Our team will contact you soon.'); rerenderAccountPages();
-    }}]});
-}
-function rerenderAccountPages(){ renderPlanChip(); if(S.page === 'reports') renderReports(); if(S.page === 'plans') renderPlans(); if(S.page === 'profile') renderProfile(); }
-
-/* ---------- profile ---------- */
-const PF = {role:null, interests:new Set()};
-const dt = t => new Date(t).toLocaleDateString(undefined, {year:'numeric', month:'short', day:'numeric'});
-function renderProfile(){
-  const u = allUsers().find(x => x.id === S.user.id); if(!u) return;
-  PF.role = u.role; PF.interests = new Set(u.interests || []);
-  const sub = subOf(), plan = PLANS[sub.plan], req = orgReq();
-  $('#pageProfile').innerHTML = `<div class="page-in"><header class="page-h"><div><h1>${ic('user')}My profile</h1><p>Edit your details, change how Earthanova adapts to you, and follow your subscription.</p></div></header>
-    <div class="prof-grid">
-    <section class="card prof-main"><div class="prof-id"><span class="avatar big">${esc($('#userBtn').textContent)}</span><div><h2>${esc(u.name)}</h2><p>${esc(u.email)}</p><p class="muted">Member since ${dt(u.created)}</p></div></div>
-      <form class="form" id="profileForm" novalidate>
-        <label>Full name<input id="pfName" type="text" value="${esc(u.name)}" autocomplete="name"></label>
-        <label>Email<input id="pfEmail" type="email" value="${esc(u.email)}" autocomplete="email"></label>
-        <fieldset><legend>I am a…</legend><div class="role-grid">${ROLES.map(r => `<button type="button" class="role" data-prole="${r.id}" aria-pressed="${r.id === u.role}">${ic(r.icon)}<span><b>${r.label}</b><small>${r.desc}</small></span></button>`).join('')}</div></fieldset>
-        <label>Field or specialty<select id="pfField"><option value="">Choose…</option>${FIELDS.map(f => `<option${f === u.field ? ' selected' : ''}>${esc(f)}</option>`).join('')}</select></label>
-        <fieldset><legend>Interests</legend><div class="chips">${INTERESTS.map(t => `<button type="button" class="chip-opt" data-pint="${esc(t)}" aria-pressed="${PF.interests.has(t)}">${esc(t)}</button>`).join('')}</div></fieldset>
-        <label>I use Earthanova for<select id="pfPurpose"><option value="">Choose…</option>${PURPOSES.map(f => `<option${f === u.purpose ? ' selected' : ''}>${esc(f)}</option>`).join('')}</select></label>
-        <fieldset><legend>Default dashboard view</legend><div class="seg" role="group" aria-label="Default view"><button type="button" data-setview="basic">${ic('eye')}Basic</button><button type="button" data-setview="advanced">${ic('flask')}Advanced</button><button type="button" data-setview="playful">${ic('bolt')}Playful</button></div></fieldset>
-        <p class="form-err" id="pfErr" role="alert"></p><div class="btn-row"><button class="btn-primary" type="submit">Save changes</button></div></form></section>
-    <aside class="prof-side">
-      <section class="card"><h2>${ic('star')}Subscription</h2><div class="sub-plan"><span class="tag mint">${plan.name}</span>${trialOf() ? `<span class="tag cyan">Pro trial · ${trialDaysLeft(trialOf())} d left</span>` : ''}<span class="lvl lvl-low">${sub.status === 'active' ? 'Active' : sub.status}</span></div>
-        <dl class="sub-dl"><div><dt>Plan</dt><dd>${plan.name} · ${plan.price} ${plan.per}</dd></div><div><dt>Started</dt><dd>${dt(sub.since)}</dd></div><div><dt>${sub.plan === 'pro' ? 'Renews' : 'Billing'}</dt><dd>${sub.plan === 'pro' ? dt(sub.renews) : sub.plan === 'basic' ? 'No charge' : 'Managed by our team'}</dd></div>${sub.plan === 'basic' ? `<div><dt>Free trial</dt><dd>${trialOf() ? `Active until ${dt(trialOf().endsAt)}` : trialUsed() ? 'Used' : `Available: ${TRIAL_DAYS} days`}</dd></div>` : ''}</dl>
-        ${req ? `<p class="plan-note">${ic('mail')}Organization request sent ${ago(req.at)} (${esc(req.status)}).</p>` : ''}
-        <div class="use-grid">${usageMeters()}</div>
-        <div class="btn-row">${sub.plan === 'basic' && !trialUsed() ? '<button class="btn-primary" data-act="trial-start">Start free trial</button>' : ''}<button class="${sub.plan === 'basic' && !trialUsed() ? 'btn-secondary' : 'btn-primary'}" data-nav="plans">Manage plan</button>${sub.plan === 'pro' ? '<button class="btn-secondary" data-act="plan-cancel">Cancel Pro</button>' : ''}</div>
-        <h3>History</h3><ul class="hist">${(sub.history || []).slice(0, 5).map(h => `<li><b>${esc(h.note)}</b><span>${dt(h.at)}</span></li>`).join('')}</ul></section>
-      <section class="card"><h2>${ic('lock')}Password</h2><form class="form" id="pwForm" novalidate><label>Current password<input id="pwOld" type="password" autocomplete="current-password"></label><label>New password<input id="pwNew" type="password" autocomplete="new-password" placeholder="At least 6 characters"></label><label>Repeat new password<input id="pwNew2" type="password" autocomplete="new-password"></label><p class="form-err" id="pwErr" role="alert"></p><button class="btn-secondary" type="submit">Update password</button></form></section>
-      <section class="card"><h2>${ic('file')}Your data</h2><div class="btn-row"><button class="btn-secondary" data-act="export-data">${ic('download')}Export my data</button><button class="btn-secondary" data-act="logout">${ic('logout')}Log out</button></div><button class="link-btn danger" data-act="delete-account">Delete my account</button></section>
-    </aside></div></div>`;
-  setView(S.view, false);
-}
-async function saveProfile(){
-  const err = $('#pfErr'); err.textContent = '';
-  const name = $('#pfName').value.trim(), email = $('#pfEmail').value.trim().toLowerCase();
-  if(!name){ err.textContent = 'Please enter your name.'; return; }
-  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ err.textContent = 'Enter a valid email address.'; return; }
-  const list = allUsers(), i = list.findIndex(x => x.id === S.user.id);
-  if(list.some((x, k) => k !== i && x.email === email)){ err.textContent = 'That email belongs to another account.'; return; }
-  Object.assign(list[i], {name, email, role:PF.role, field:$('#pfField').value, interests:[...PF.interests], purpose:$('#pfPurpose').value});
-  store.set('es:users', list); setUser(list[i]); toast('Profile updated.'); renderProfile();
-}
-async function savePassword(){
-  const err = $('#pwErr'); err.textContent = '';
-  const list = allUsers(), i = list.findIndex(x => x.id === S.user.id), u = list[i];
-  if(u.hash !== await sha(u.salt + $('#pwOld').value)){ err.textContent = 'Current password is incorrect.'; return; }
-  if($('#pwNew').value.length < 6){ err.textContent = 'New password must be at least 6 characters.'; return; }
-  if($('#pwNew').value !== $('#pwNew2').value){ err.textContent = 'The new passwords do not match.'; return; }
-  u.salt = Math.random().toString(36).slice(2) + Date.now().toString(36); u.hash = await sha(u.salt + $('#pwNew').value); store.set('es:users', list);
-  toast('Password updated.'); $('#pwForm').reset();
-}
-function exportData(){
-  const u = allUsers().find(x => x.id === S.user.id), {salt, hash, ...pub} = u;
-  const data = {profile:pub, subscription:subOf(), projects:favs(), recent:recents(), reports:reportsOf(), organizationRequest:orgReq()};
-  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], {type:'application/json'})); a.download = 'earthanova-my-data.json'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-}
-function deleteAccount(){
-  showDialog({title:'Delete your account?', body:'<p>This removes your profile, projects, reports and subscription from this browser. It cannot be undone.</p>', actions:[{label:'Keep my account'}, {label:'Delete everything', cls:'btn-primary danger-btn', fn:() => {
-    const id = S.user.id; if(RP.tok) acctApi('DELETE', '/account', null).catch(() => {}); store.set('es:users', allUsers().filter(x => x.id !== id));
-    Object.keys(localStorage).filter(k => k.endsWith(':' + id)).forEach(k => localStorage.removeItem(k)); logout(); toast('Your account was deleted.');
-  }}]});
-}
 
 /* ---------- place picker (used by compare) ---------- */
 function placePicker(inp, list, onPick){
@@ -1671,68 +1191,45 @@ async function loadPlanner(r){
 }
 /* ---------- wiring ---------- */
 function goIdle(){ S.token++; setState('idle'); announce('Explore the globe, search, or click anywhere on Earth.'); }
-function logout(){
-  if(RP.tok){ const t = RP.tok; acctApi('POST', '/account/logout', null, t).catch(() => {}); if(S.user) store.set(uKey('tok'), null); }
-  setUser(null); S.A = S.I = S.H = null; S.pending = null; S.riskTok++;
-  closeUserPop(); renderPresets(); fillLocation(); if(world) world.labelsData(globeLabels());
-  goHome(); setState('idle'); toast('You are logged out.');
-}
 document.addEventListener('click', e => {
   const t = e.target;
   const nav = t.closest('[data-nav]'); if(nav){ go(nav.dataset.nav); return; }
   const nl = t.closest('[data-nav-link]'); if(nl){ go(nl.dataset.navLink); return; }
-  const sv = t.closest('[data-setview]'); if(sv){ const v = sv.dataset.setview; if(v === 'advanced' && !hasAdvanced() && S.page !== 'dashboard'){ trialDialog(); return; } setView(v); return; }
-  if(!t.closest('#userMenu')) closeUserPop();
+  const sv = t.closest('[data-setview]'); if(sv){ setView(sv.dataset.setview); return; }
   const ps = t.closest('[data-pl-sel]'); if(ps){ PL.sel = ps.dataset.plSel; if(CMP.res) loadPlanner(CMP.res); return; }
   const cp = t.closest('[data-cmp-pick]'); if(cp){ const l = findLoc(cp.dataset.id) || knownPlaces().find(x => x.id === cp.dataset.id); if(l){ CMP[cp.dataset.cmpPick] = l; CMP.res = null; $(cp.dataset.cmpPick === 'from' ? '#cmpFrom' : '#cmpTo').value = l.name; } return; }
-  const pr = t.closest('[data-prole]'); if(pr){ PF.role = pr.dataset.prole; $$('[data-prole]').forEach(x => x.setAttribute('aria-pressed', x === pr)); return; }
-  const pi = t.closest('[data-pint]'); if(pi){ const k = pi.dataset.pint; PF.interests.has(k) ? PF.interests.delete(k) : PF.interests.add(k); pi.setAttribute('aria-pressed', PF.interests.has(k)); return; }
   const b = t.closest('[data-act]'); if(!b) return;
   const act = b.dataset.act, id = b.dataset.id;
   if(act === 'open' || act === 'open-risk'){ const l = findLoc(id); if(l){ S.loc = withId(l); S.goto = act === 'open-risk' ? 'risk' : null; scan(); } }
   else if(act === 'del'){ const l = findLoc(id); if(l){ toggleFav(l); renderProjects(); fillLocation(); if(world) world.labelsData(globeLabels()); toast(`${l.short || l.name} removed from Projects.`); } }
-  else if(act === 'star'){ const l = findLoc(id); if(l){ if(!isFav(l) && !canAdd('projects')){ upsell('projects'); return; } if(!isFav(l)) toggleFav(l); renderProjects(); fillLocation(); toast(`${l.short || l.name} added to Projects.`); } }
+  else if(act === 'star'){ const l = findLoc(id); if(l){ if(!isFav(l)) toggleFav(l); renderProjects(); fillLocation(); toast(`${l.short || l.name} added to Projects.`); } }
   else if(act === 'go-home') goHome();
   else if(act === 'clear'){ Object.keys(localStorage).filter(k => k.startsWith(CACHE_VER)).forEach(k => localStorage.removeItem(k)); toast('Cached scans cleared.'); }
   else if(act === 'csv'){ if(S.A) downloadCSV(S.A, S.loc); else toast('Scan a location first.'); }
-  else if(act === 'report-quick'){ if(!S.A) return; saveReport(`${S.loc.short} climate and hazard study`, '', SECTIONS.map(s => s[0])).then(r => { if(r) toast('Report saved to your account. Find it in Reports.'); }); }
+  else if(act === 'report-quick'){ if(!S.A) return; saveReport(`${S.loc.short} climate and hazard study`, '', SECTIONS.map(s => s[0])).then(r => { if(r && !RP.list.some(x => x.id === r.id && x.createdAt < Date.now() - 2000)) toast('Report saved. Find it in Reports (kept for this visit).'); }); }
   else if(act === 'report-save' || act === 'report-save-pdf'){
     const secs = $$('.rp-sec').filter(c => c.checked).map(c => c.value);
     if(!secs.length){ toast('Pick at least one section to include.'); return; }
     const pre = act === 'report-save-pdf' ? window.open('', '_blank') : null;
-    saveReport($('#rpTitle').value.trim(), $('#rpNotes').value.trim(), secs).then(r => { if(r){ renderReports(); toast('Report saved to your account.'); if(pre) openReport(r, true, pre); } else if(pre) pre.close(); });
+    saveReport($('#rpTitle').value.trim(), $('#rpNotes').value.trim(), secs).then(r => { if(r){ renderReports(); if(pre) openReport(r, true, pre); } else if(pre) pre.close(); });
   }
-  else if(act === 'plan-pro') proDialog();
-  else if(act === 'trial-start') startTrial();
-  else if(act === 'plan-org') orgDialog();
-  else if(act === 'plan-basic') showDialog({title:'Switch to Basic?', body:'<p>Basic includes 3 projects and 3 saved reports. Items you already have are kept, but you will not be able to add more until you are under the limits.</p>', actions:[{label:'Stay on my plan'}, {label:'Switch to Basic', cls:'btn-primary', fn:() => { setPlan('basic', 'Switched to Basic'); toast('You are on the Basic plan.'); rerenderAccountPages(); }}]});
-  else if(act === 'plan-cancel') showDialog({title:'Cancel Pro?', body:'<p>You will move to the Basic plan right away. Your data is kept, but Basic has lower limits.</p>', actions:[{label:'Keep Pro'}, {label:'Cancel Pro', cls:'btn-primary', fn:() => { setPlan('basic', 'Pro cancelled'); toast('Pro cancelled. You are on Basic.'); rerenderAccountPages(); }}]});
-  else if(act === 'export-data') exportData();
-  else if(act === 'logout') logout();
-  else if(act === 'delete-account') deleteAccount();
   else if(act === 'cmp-swap'){ [CMP.from, CMP.to] = [CMP.to, CMP.from]; CMP.res = null; renderCompare(); }
   else if(act === 'cmp-open'){ if(CMP.res){ S.loc = withId(CMP.res.b.loc); S.goto = null; scan(); } }
   else if(act.startsWith('report-')){
     const m = reportsOf().find(x => x.id === id); if(!m) return;
     if(act === 'report-del'){
-      acctApi('DELETE', `/account/reports/${encodeURIComponent(id)}`).then(() => { RP.list = RP.list.filter(x => x.id !== id); delete RP.full[id]; renderReports(); rerenderAccountPages(); toast('Report deleted from your account.'); })
+      sessApi('DELETE', `/session/${RP.sid}/reports/${encodeURIComponent(id)}`).then(() => { RP.list = RP.list.filter(x => x.id !== id); delete RP.full[id]; renderReports(); toast('Report deleted.'); })
         .catch(() => toast('Could not delete the report. Check your connection and try again.'));
     }else{
       const pre = act === 'report-csv' ? null : window.open('', '_blank');
       fullReport(id).then(r => { if(act === 'report-csv') downloadCSV(r.A, r.loc); else openReport(r, act === 'report-pdf', pre); })
-        .catch(() => { if(pre) pre.close(); toast('Could not open the report from the database.'); });
+        .catch(() => { if(pre) pre.close(); toast('Could not open the report. It may have expired with your previous visit.'); });
     }
   }
-  else if(act === 'quiz-pick') quizPick(b.dataset.k, b);
-  else if(act === 'quiz-next'){ Q.i++; Q.locked = false; renderQuiz(); }
-  else if(act === 'quiz-again') resetQuiz();
-  else if(act === 'guess-lock') guessLock();
 });
 document.addEventListener('submit', e => {
   const f = e.target.id;
-  if(f === 'profileForm'){ e.preventDefault(); saveProfile(); }
-  else if(f === 'pwForm'){ e.preventDefault(); savePassword(); }
-  else if(f === 'cmpForm'){ e.preventDefault(); runCompare(); }
+  if(f === 'cmpForm'){ e.preventDefault(); runCompare(); }
 });
 ['#pStart', '#pEnd', '#dStart', '#dEnd'].forEach(i => $(i).addEventListener('change', e => fixPeriod(e.target)));
 $('#dRad').addEventListener('change', () => { $('#radius').value = $('#dRad').value; });
@@ -1745,9 +1242,6 @@ document.addEventListener('change', e => {
 $('#homeLink').addEventListener('click', e => { e.preventDefault(); goHome(); });
 $('#scanBtn').addEventListener('click', requestScan);
 $('#scanRegionBtn').addEventListener('click', () => { if(S.state === 'selected') requestScan(); else { sInput.focus(); toast('Search a place, pick a featured city, or click anywhere on the globe.'); } });
-$('#loginBtn').addEventListener('click', () => openAuth('login', 'Log in to your account.'));
-$('#logoutBtn').addEventListener('click', logout);
-$('#userBtn').addEventListener('click', () => { const p = $('#userPop'); p.hidden = !p.hidden; $('#userBtn').setAttribute('aria-expanded', !p.hidden); });
 $('#retryBtn').addEventListener('click', () => scan(true));
 $('#changeBtn').addEventListener('click', goIdle);
 $('#errChange').addEventListener('click', goHome);
@@ -1756,13 +1250,16 @@ $('#riskRescan').addEventListener('click', renderRisk);
 $('#sbChip').addEventListener('click', () => { if(S.state === 'results') scan(true); });
 $('#locSelect').addEventListener('change', e => { const l = findLoc(e.target.value); if(l){ S.loc = withId(l); scan(); } });
 $('#radius').addEventListener('change', () => { $('#locArea').textContent = `${$('#radius').value} km`; });
-$('#favBtn').addEventListener('click', () => { if(!isFav(S.loc) && !canAdd('projects')){ upsell('projects'); return; } const on = toggleFav(S.loc); $('#favBtn').setAttribute('aria-pressed', on); fillLocation(); if(world) world.labelsData(globeLabels()); toast(on ? `${S.loc.short} added to Projects. You are now studying it.` : `${S.loc.short} removed from Projects.`); });
-document.addEventListener('keydown', e => { if(e.key === 'Escape'){ closeUserPop(); if(!$('#dlg').hidden) closeDialog(); if(S.page === 'home' && S.state === 'selected' && $('#auth').hidden) goIdle(); } });
+$('#favBtn').addEventListener('click', () => { const on = toggleFav(S.loc); $('#favBtn').setAttribute('aria-pressed', on); fillLocation(); if(world) world.labelsData(globeLabels()); toast(on ? `${S.loc.short} added to Projects. You are now studying it.` : `${S.loc.short} removed from Projects.`); });
+document.addEventListener('keydown', e => { if(e.key === 'Escape'){ if(!$('#dlg').hidden) closeDialog(); else if(S.page === 'home' && S.state === 'selected') goIdle(); } });
 
 /* ---------- boot ---------- */
-wireAuth(); initPeriodControls();
-const sessionId = store.get('es:session', null), sessionUser = sessionId && allUsers().find(u => u.id === sessionId);
-if(sessionUser) setUser(sessionUser);
+initPeriodControls();
+/* accounts were removed: clear what older versions kept in this browser (accounts, passwords, plans, account tokens) */
+try{ Object.keys(localStorage).filter(k => k === 'es:users' || k === 'es:session' || /^es:(tok|sub|orgreq|reports|view):u/.test(k)).forEach(k => localStorage.removeItem(k)); }catch{}
+setView(store.get('es:view', 'basic'), false);
+initViews({ic, store, toast, place:() => S.loc});
+startSession();
 initGlobe();
 S.loc = withId(PRESETS[0]); fillLocation(); setState('idle'); updateGlobe(true);
 function finishSplash(){ setPage('home'); setState('idle'); updateGlobe(); }
