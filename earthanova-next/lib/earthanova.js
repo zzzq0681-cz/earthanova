@@ -3,11 +3,11 @@
  * and is loaded once, client-side only, by components/EarthanovaClient.tsx. */
 import Globe from 'globe.gl';
 import {towerViz, renderChart as renderHzChart, wireCharts as wireHzCharts} from './hazard-charts.js';
-import {buildPlan, bestTimeHtml, riskCalendarHtml, eonetByMonth, wirePlanner} from './compare-planner.js';
-import {mlHtml, mlErrorHtml, nextDaysHtml} from './compare-ml.js';
+import {buildPlan, bestTimeHtml, wirePlanner} from './compare-planner.js';
+import {outlookHtml, climFromOutlook, HZ_Q, hazardTrend, glanceHtml, calendarHtml, eventsMapHtml} from './risk-compare.js';
 import {initViews, renderBasic, renderAdvanced as renderAdvViews, renderPlayful as renderPlayViews} from './views.js';
 import {VARS, series as dvSeries, verdict as dvVerdict, fmt as dvFmt, sgn as dvSgn, pTxt} from './detective.js';
-import {eonetEvents, nasaHazards, nasaWindow, nasaClimateYear, nasaPredict, apiBase, nasaFind, nasaEnsure, nasaLoad, nasaBuildAnalysis, isStatic, reportUrl} from './nasa-data.js';
+import {eonetEvents, nasaHazards, nasaOutlook, nasaClimateYear, apiBase, nasaFind, nasaEnsure, nasaLoad, nasaBuildAnalysis, isStatic, reportUrl} from './nasa-data.js';
 
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -189,7 +189,7 @@ async function usgsQuakes(loc, radiusKm, period){
   const f = j.features || [];
   return {count:f.length, maxMag: f.length ? Math.max(...f.map(q => q.properties.mag)) : null,
     all: f.map(q => ({mag:q.properties.mag, time:q.properties.time})),
-    list: f.slice(0, 25).map(q => ({mag:q.properties.mag, place:q.properties.place, time:q.properties.time, url:q.properties.url,
+    list: f.slice(0, 60).map(q => ({mag:q.properties.mag, place:q.properties.place, time:q.properties.time, url:q.properties.url, lat:q.geometry.coordinates[1], lon:q.geometry.coordinates[0],
       dist: Math.round(haversine(loc.lat, loc.lon, q.geometry.coordinates[1], q.geometry.coordinates[0]))}))};
 }
 /* Previous Open-Meteo / USGS implementation, no longer used for the climate record. */
@@ -441,7 +441,7 @@ function hazardReadings(A, I){
     score:Math.round(clamp(Math.max((dHot ?? 0) / 15, (dT ?? 0) / 1) * 100)),
     headline:dT != null && dT >= 0.3 ? `Warming ${sgn(dT)} °C vs ${per(A).baseLabel}` : 'No strong warming signal',
     explain:`Compares ${per(A).curLabel} with the ${per(A).baseLabel} baseline. Rated moderate at +0.5 °C or +5 hot days a year, and high at +1 °C or +15 hot days (a hot day is ${A.hotBase} °C or more).`,
-    metrics:[['Temperature change', sgn(dT) + ' °C'], [`Days ≥ ${A.hotBase} °C`, `${A.base.hot ?? '—'} → ${A.cur.hot ?? '—'} / yr`], ['Trend', A.trend ? sgn(A.trend.slope, 2) + ' °C/yr' : 'n/a']], items:[]};
+    metrics:[['Temperature change', sgn(dT) + ' °C'], ...(A.base.hot != null ? [[`Days ≥ ${A.hotBase} °C`, `${A.base.hot} → ${A.cur.hot ?? '—'} / yr`]] : []), ['Trend', A.trend ? sgn(A.trend.slope * 10, 2) + ' °C per decade' : 'n/a']], items:[]};
   const dr = I.dRain, ds = I.drySoil ? null : I.dSoil, arid = A.base.rain != null && A.base.rain < 150;
   H.drought = (dr == null && ds == null) ? {level:'na', score:0, headline:'No rainfall record', explain:'NASA POWER soil wetness and NASA GPM IMERG rainfall were not available.', metrics:[], items:[]} : {
     level:((dr ?? 0) <= -25 || (ds ?? 0) <= -25) ? 'high' : ((dr ?? 0) <= -15 || (ds ?? 0) <= -15) ? 'moderate' : 'low',
@@ -507,48 +507,45 @@ function highlightTowers(svg, i){
 function renderRiskStage(levels){ drawTowers($('#riskSvg'), HAZARDS, levels, 'r', selectHazard, S.hazard); }
 function applyHazardHighlight(){
   highlightTowers($('#riskSvg'), S.hazard);
-  $$('#towerList .tw-row').forEach(b => b.setAttribute('aria-pressed', +b.dataset.i === S.hazard));
+  $$('#towerList .gl-row').forEach(b => b.setAttribute('aria-pressed', +b.dataset.i === S.hazard));
 }
 function selectHazard(i){ S.hazard = i; applyHazardHighlight(); renderTowerDetail(); }
 function renderTowerList(levels){
-  $('#towerList').innerHTML = HAZARDS.map((h, i) => { const lv = levels[i]; return `<li><button class="tw-row" data-i="${i}" aria-pressed="${i === S.hazard}"><span class="tw-ic" style="color:${LEVEL[lv][1]}">${ic(h.icon)}</span><span class="tw-t"><b>${h.name}</b><small>${h.hazard}</small></span><span class="lvl lvl-${lv}">${LEVEL[lv][0]}</span></button></li>`; }).join('');
-  $$('#towerList .tw-row').forEach(b => b.addEventListener('click', () => selectHazard(+b.dataset.i)));
+  $('#towerList').innerHTML = glanceHtml(HAZARDS, S.H, levels, S.hazard, LEVEL, ic, S.A);
+  $$('#towerList .gl-row').forEach(b => b.addEventListener('click', () => selectHazard(+b.dataset.i)));
   const n = k => levels.filter(l => l === k).length;
-  $('#riskCounts').innerHTML = `<span class="lvl lvl-high">${n('high')} high</span><span class="lvl lvl-moderate">${n('moderate')} moderate</span><span class="lvl lvl-low">${n('low')} low</span>${n('na') ? `<span class="lvl lvl-na">${n('na')} no data</span>` : ''}`;
+  $('#riskCounts').innerHTML = levels.includes('scanning') ? '<span class="lvl lvl-scanning">Scanning…</span>' : `<span class="lvl lvl-high">${n('high')} high</span><span class="lvl lvl-moderate">${n('moderate')} moderate</span><span class="lvl lvl-low">${n('low')} low</span>${n('na') ? `<span class="lvl lvl-na">${n('na')} no data</span>` : ''}`;
 }
 function renderTowerDetail(){
   if(!S.H) return;
-  const h = HAZARDS[S.hazard], r = S.H[h.id], lv = LEVEL[r.level];
+  const h = HAZARDS[S.hazard], r = S.H[h.id], lv = LEVEL[r.level], tr = hazardTrend(S.A, h.id);
   let viz = {charts:[], analysis:[], note:''}, figs = '', tips = {};
   try{
     const pd = per(S.A); viz = towerViz(h.id, S.A, {years:pd.years, baseLabel:pd.baseLabel, curLabel:pd.curLabel});
     figs = viz.charts.map((c, i) => { const o = renderHzChart(c, `${h.id}${i}`); tips[`${h.id}${i}`] = o.tips; return o.html; }).join('');
   }catch(e){ console.warn('hazard charts', e); }
-  $('#towerDetail').innerHTML = `<header><span class="td-ic" style="color:${lv[1]}">${ic(h.icon)}</span><div><p class="td-code">${h.code} · ${h.hazard}</p><h3>${h.name}</h3></div><span class="lvl lvl-${r.level}">${lv[0]}</span></header>
-    <div class="meter" role="img" aria-label="Risk score ${r.score} out of 100"><span style="width:${r.score}%;background:${lv[1]}"></span></div>
-    <p class="td-head">${esc(r.headline)}</p><p class="td-exp">${esc(r.explain)}</p>
-    ${r.metrics.length ? `<div class="kv">${r.metrics.map(m => `<div><span>${esc(m[0])}</span><b>${esc(m[1])}</b></div>`).join('')}</div>` : ''}
-    ${r.items.length ? `<h4>Recent events</h4><ul class="list">${r.items.map(e => `<li><div class="grow"><b>${esc(e.title)}</b><span>${esc(e.meta)}</span></div>${e.url ? `<a class="link-btn" href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.tag || 'USGS')}</a>` : ''}</li>`).join('')}</ul>` : ''}
-    <p class="td-src">Source: ${esc(h.src)}. Screening only. This is not an official hazard assessment or warning system.</p>`;
-  const vz = $('#towerViz');
-  if(vz){
-    const n = viz.charts.length;
-    vz.innerHTML = n ? `<div class="hz-board-h"><span class="td-ic" style="color:${lv[1]}">${ic(h.icon)}</span><div><p class="td-code">${h.code} · ${h.hazard}</p><h3>${h.name}: charts and analysis</h3></div><span class="lvl lvl-${r.level}">${lv[0]}</span></div>
-      <div class="hz-grid n${Math.min(n, 2)}" aria-label="Charts for ${esc(h.name)}">${figs}
-        ${viz.analysis.length ? `<section class="hz-card hz-ana"><h4>Analysis</h4><ul class="hz-analysis">${viz.analysis.map(t => `<li>${esc(t)}</li>`).join('')}</ul>${viz.note ? `<p class="hz-note">${esc(viz.note)}</p>` : ''}</section>` : ''}</div>`
-      : (r.level === 'na' ? '' : `<div class="hz-board-h"><div><h3>${h.name}</h3></div></div><p class="td-exp">No chart is available for this tower with the data loaded.</p>`);
-    wireHzCharts(vz, tips);
-  }
+  const stamp = tr ? `<p class="stamp ${tr.vd.level === 'real' ? 'lv-real' : tr.vd.level === 'maybe' ? 'lv-maybe' : 'lv-none'}" title="Mann-Kendall test, ${tr.years}">${esc(tr.text)}</p>` : '';
+  const el = $('#towerDetail');
+  el.innerHTML = `<header class="rd-h"><span class="td-ic" style="color:${lv[1]}">${ic(h.icon)}</span><div class="grow"><p class="td-code">${h.code} · ${esc(h.name)}</p><h2>${esc(HZ_Q[h.id])}</h2></div><span class="lvl lvl-${r.level}">${lv[0]}</span></header>
+    <div class="rd-sum"><div><p class="td-head">${esc(r.headline)}</p>${stamp}<div class="meter" role="img" aria-label="Risk score ${r.score} out of 100"><span style="width:${r.score}%;background:${lv[1]}"></span></div><small class="muted">Risk score ${r.score} / 100</small></div>
+      ${r.metrics.length ? `<div class="kv">${r.metrics.map(m => `<div><span>${esc(m[0])}</span><b>${esc(m[1])}</b></div>`).join('')}</div>` : ''}</div>
+    ${viz.charts.length ? `<div class="hz-grid n${Math.min(viz.charts.length, 2)}">${figs}${viz.analysis.length ? `<section class="hz-card hz-ana"><h4>What the data says</h4><ul class="hz-analysis">${viz.analysis.map(t => `<li>${esc(t)}</li>`).join('')}</ul></section>` : ''}</div>` : (r.level === 'na' ? '' : '<p class="td-exp">No chart is available for this tower with the data loaded.</p>')}
+    <div class="rd-more"><details><summary>How is this rated?</summary><p class="td-exp">${esc(r.explain)}</p>${viz.note ? `<p class="td-exp">${esc(viz.note)}</p>` : ''}</details>
+    ${r.items.length ? `<details><summary>Recent events (${r.items.length})</summary><ul class="list">${r.items.map(e => `<li><div class="grow"><b>${esc(e.title)}</b><span>${esc(e.meta)}</span></div>${e.url ? `<a class="link-btn" href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.tag || 'USGS')}</a>` : ''}</li>`).join('')}</ul></details>` : ''}</div>
+    <p class="td-src">Source: ${esc(h.src)}. Screening only, not an official hazard warning.</p>`;
+  wireHzCharts(el, tips);
 }
 function renderRisk(){
   const has = !!S.A;
   $('#riskWrap').hidden = !has; $('#riskEmpty').hidden = has;
   if(!has) return;
-  $('#riskSub').textContent = `${S.loc.name} · scanned ${ago(S.A.fetchedAt)} · ${S.A.radiusKm} km radius. Storms, floods, landslides and volcanoes come from NASA EONET; air quality (PM2.5) from NASA MERRA-2; sea level from NASA-SSH altimetry; earthquakes from USGS (EONET has none); heat, drought and rainfall signals from NASA POWER and GPM IMERG. Wildfires are not tracked: EONET does not separate natural from human-caused fires.`;
+  $('#riskSub').textContent = `${S.loc.name}, ${S.A.radiusKm} km around, ${per(S.A).label}. Six towers, one per natural hazard.`;
   refreshMosaics();
+  try{ $('#riskCal').innerHTML = calendarHtml(S.A); }catch(e){ console.warn('calendar', e); }
+  try{ const m = eventsMapHtml(S.A); $('#riskEvents').innerHTML = m.html; $('#mapCount').textContent = `${m.n} event${m.n === 1 ? '' : 's'}`; }catch(e){ console.warn('map', e); }
   const tok = ++S.riskTok, final = levelsOf(S.H), cur = HAZARDS.map(() => 'scanning');
   renderRiskStage(cur); renderTowerList(cur); renderTowerDetail();
-  HAZARDS.forEach((_, i) => setTimeout(() => { if(tok !== S.riskTok || S.page !== 'risk') return; cur[i] = final[i]; renderRiskStage(cur); renderTowerList(cur); }, REDUCED ? 0 : 500 + i*380));
+  HAZARDS.forEach((_, i) => setTimeout(() => { if(tok !== S.riskTok || S.page !== 'risk') return; cur[i] = final[i]; renderRiskStage(cur); renderTowerList(cur); }, REDUCED ? 0 : 400 + i*300));
   announce('Risk towers are scanning ' + S.loc.name);
 }
 
@@ -802,6 +799,7 @@ async function scan(force = false){
   if(S.goto){ const g = S.goto; S.goto = null; go(g); }
 }
 function showResults(){
+  document.body.classList.add('scanned');   // page navigation appears once a place has been scanned
   if(!S.A) return;
   S.loc = S.A.loc; fillLocation(); syncScanCtl(); renderDashboard(); renderInset(); setState('results');
   $('#stExplain').textContent = 'Scan complete. Switch views above, or open Risk Monitoring to see one tower per natural hazard.';
@@ -1020,7 +1018,7 @@ function renderCompare(){
   if(!CMP.start){ const a = new Date(Date.now() + 14*864e5), b = new Date(Date.now() + 21*864e5); CMP.start = isoDay(a); CMP.end = isoDay(b); }
   if(!CMP.from && S.A) CMP.from = S.A.loc;
   const chipsFor = key => knownPlaces().slice(0, 6).map(p => `<button type="button" class="chip-opt" data-cmp-pick="${key}" data-id="${esc(p.id)}">${esc(p.short)}</button>`).join('');
-  $('#pageCompare').innerHTML = `<div class="page-in"><header class="page-h"><div><h1>${ic('compare')}Compare places</h1><p>Thinking of travelling or moving? Pick where you are, where you want to go and when. We compare the climate for your dates, the air and the earthquake risk, then tell you if it looks like a good decision.</p></div></header>
+  $('#pageCompare').innerHTML = `<div class="page-in"><header class="page-h"><div><h1>${ic('compare')}Compare places</h1><p>Is your destination a good choice for your dates? Pick two places and the dates. We compare them with NASA data and give one clear answer.</p></div></header>
     <form class="card cmp-form" id="cmpForm" novalidate>
       <div class="cmp-grid">
         <div class="cmp-f"><label for="cmpFrom">From: where you are</label><div class="pick">${ic('pin')}<input id="cmpFrom" type="text" autocomplete="off" placeholder="Search a city…" value="${esc(CMP.from?.name || '')}"><ul class="pick-list" id="cmpFromList" hidden></ul></div><div class="chips">${chipsFor('from')}</div></div>
@@ -1041,26 +1039,19 @@ function renderCompare(){
 }
 const mdNum = d => (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
 async function placeData(l, win){
-  const q = `latitude=${l.lat}&longitude=${l.lon}`, today = isoDay(new Date()), far = isoDay(new Date(Date.now() + 15*864e5));
-  const near = win.start <= far && win.end >= today;
-  const dustP = nasaEnsure(l.lat, l.lon, l.short || l.name).then(hit => nasaHazards(hit.place.name));   // slow the first time for a new place
-  const [clm, eq, dst, fc] = await Promise.allSettled([
-    nasaWindow(l.lat, l.lon, win.start, win.end),
+  const q = `latitude=${l.lat}&longitude=${l.lon}`;
+  const hzP = nasaEnsure(l.lat, l.lon, l.short || l.name).then(hit => nasaHazards(hit.place.name));   // slow the first time for a new place
+  const [olR, eq, hz] = await Promise.allSettled([
+    nasaOutlook(l.lat, l.lon, win.start, win.end),
     getJSON(`https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&${q}&maxradiuskm=200&starttime=${LAST_YEAR - 9}-01-01&minmagnitude=4.5&orderby=magnitude&limit=500`, 15000),
-    dustP,
-    near ? getJSON(`https://api.open-meteo.com/v1/forecast?${q}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,wind_gusts_10m_max&start_date=${win.start < today ? today : win.start}&end_date=${win.end > far ? far : win.end}&timezone=auto`, 15000) : Promise.reject(new Error('far'))
+    hzP
   ]);
-  if(clm.status !== 'fulfilled') throw new Error(`NASA climate history for ${l.short} could not be loaded${clm.reason?.message ? ` (${clm.reason.message})` : ''}.`);
-  const clim = clm.value; clim.rainTotal = clim.rainPerDay * clim.lenDays;
+  if(olR.status !== 'fulfilled') throw new Error(`NASA climate history for ${l.short} could not be loaded${olR.reason?.message ? ` (${olR.reason.message})` : ''}.`);
+  const ol = olR.value, clim = climFromOutlook(ol);
   const f = eq.status === 'fulfilled' ? eq.value.features || [] : null;
   const quakes = f ? {perYear:f.length / 10, count:f.length, max:f.length ? Math.max(...f.map(q => q.properties.mag)) : null} : null;
-  const dustA = dst.status === 'fulfilled' ? dst.value.dust?.annual : null;
-  const dust = dustA && dustA.length ? mean(dustA.slice(-5)) : null;
-  const airA = dst.status === 'fulfilled' ? dst.value.air?.annual : null;
-  const pm = airA && airA.length >= 5 ? mean(airA.slice(-5)) : null;
-  const fd = fc.status === 'fulfilled' ? fc.value.daily : null;
-  const fcast = fd && fd.time.length ? {n:fd.time.length, hi:mean(fd.temperature_2m_max), lo:mean(fd.temperature_2m_min), rain:fd.precipitation_sum.reduce((a, b) => a + (b || 0), 0), gust:Math.max(...fd.wind_gusts_10m_max)} : null;
-  return {loc:l, clim, quakes, dust, pm, elev:null, fcast};
+  const dustA = hz.status === 'fulfilled' ? hz.value.dust?.annual : null, airA = hz.status === 'fulfilled' ? hz.value.air?.annual : null;
+  return {loc:l, ol, clim, quakes, dust:dustA?.length ? mean(dustA.slice(-5)) : null, pm:airA?.length >= 5 ? mean(airA.slice(-5)) : null, elev:null};
 }
 function scorePlace(d, pref, purpose){
   const c = d.clim, [lo, hi] = PREF[pref], dist = c.meanT < lo ? lo - c.meanT : c.meanT > hi ? c.meanT - hi : 0;
@@ -1075,8 +1066,8 @@ function scorePlace(d, pref, purpose){
   return {parts:P, total:Math.round(ts / tw)};
 }
 const CMP_METRICS = [
-  ['comfort', 'Typical temperature', d => `${d.clim.meanT.toFixed(1)} °C <small>(high ${d.clim.hi.toFixed(0)} · low ${d.clim.lo.toFixed(0)})</small>`],
-  ['rain', 'Rain in your dates', d => `${d.clim.rainTotal.toFixed(0)} mm <small>(${Math.round(d.clim.wetFrac * 100)}% wet days)</small>`],
+  ['comfort', 'Typical temperature', d => `${d.clim.meanT.toFixed(1)} °C <small>(day ${d.clim.hi.toFixed(0)} · night ${d.clim.lo.toFixed(0)})</small>`],
+  ['rain', 'Rain in your dates', d => `${d.clim.rainTotal.toFixed(0)} mm <small>(${Math.round(d.clim.wetFrac * 100)}% rainy days)</small>`],
   ['extreme', 'Extreme heat / cold days', d => `${Math.round(d.clim.hotFrac * 100)}% hot · ${Math.round(d.clim.coldFrac * 100)}% freezing`],
   ['air', 'Air quality (PM2.5, yearly mean)', d => d.pm != null ? `${d.pm.toFixed(1)} µg/m³` : d.dust == null ? 'No data' : `${d.dust.toFixed(1)} µg/m³ <small>(dust only)</small>`],
   ['seismic', 'Earthquake activity', d => d.quakes ? `${d.quakes.perYear.toFixed(1)} M4.5+ / yr${d.quakes.max ? ` <small>(max M${d.quakes.max.toFixed(1)})</small>` : ''}` : 'No data'],
@@ -1113,80 +1104,52 @@ async function runCompare(){
   if(CMP.from.id === CMP.to.id){ err.textContent = 'Pick two different places.'; return; }
   if(!CMP.start || !CMP.end || CMP.end < CMP.start){ err.textContent = 'Choose travel dates (the end date must be after the start).'; return; }
   if((new Date(CMP.end) - new Date(CMP.start)) / 864e5 > 90){ err.textContent = 'Please choose a window of 90 days or less.'; return; }
-  const win = {start:CMP.start, end:CMP.end}; $('#cmpOut').innerHTML = '<div class="card cmp-load"><div class="spinner"></div><p>Comparing NASA climate, dust and earthquake history for both places. A new place can take 1-2 minutes the first time…</p></div>';
+  const win = {start:CMP.start, end:CMP.end}; $('#cmpOut').innerHTML = '<div class="card cmp-load"><div class="spinner"></div><p>Reading 30 years of NASA climate, the air and earthquake history for both places. A new place can take 1–2 minutes the first time…</p></div>';
   try{
     const [a, b] = await Promise.all([placeData(CMP.from, win), placeData(CMP.to, win)]);
-    CMP.res = {a, b, win, purpose:CMP.purpose, pref:CMP.pref, at:Date.now()}; PL.cache = {}; PL.sel = 'to'; showCompare(CMP.res);
+    CMP.res = {a, b, win, purpose:CMP.purpose, pref:CMP.pref, at:Date.now()}; showCompare(CMP.res);
   }catch(ex){ $('#cmpOut').innerHTML = ''; err.textContent = (ex.message || 'Comparison failed.') + ' Check your connection and try again.'; }
 }
 function showCompare(r){
   const {a, b, win} = r, sa = scorePlace(a, r.pref, r.purpose), sb = scorePlace(b, r.pref, r.purpose), v = advise(a, b, sa, sb, win, r.purpose);
   const rows = CMP_METRICS.filter(m => sa.parts[m[0]] || sb.parts[m[0]]).map(m => { const x = sa.parts[m[0]]?.score ?? 0, y = sb.parts[m[0]]?.score ?? 0, w = Math.abs(x - y) < 5 ? '' : x > y ? 'a' : 'b';
     return `<tr><th scope="row">${m[1]}</th><td class="${w === 'a' ? 'win' : ''}">${sa.parts[m[0]] ? m[2](a) : '—'}${w === 'a' ? ic('check') : ''}</td><td class="${w === 'b' ? 'win' : ''}">${sb.parts[m[0]] ? m[2](b) : '—'}${w === 'b' ? ic('check') : ''}</td></tr>`; }).join('');
-  const fcBox = d => d.fcast ? `<p class="cmp-fc">${ic('calendar')}<span>Forecast for ${d.fcast.n} of your days: highs ${d.fcast.hi.toFixed(0)} °C, lows ${d.fcast.lo.toFixed(0)} °C, ${d.fcast.rain.toFixed(0)} mm rain, gusts to ${d.fcast.gust.toFixed(0)} km/h.</span></p>` : '';
-  const sc = (d, s) => `<div class="cmp-card"><h3>${esc(d.loc.name)}</h3><p class="mono">${fmtLat(d.loc.lat)}, ${fmtLon(d.loc.lon)}</p><div class="cmp-score"><b>${s.total}</b><span>/ 100 comfort and safety score</span></div><div class="meter"><span style="width:${s.total}%;background:${s.total >= 70 ? 'var(--mint)' : s.total >= 50 ? 'var(--amber)' : 'var(--red)'}"></span></div>${fcBox(d)}</div>`;
+  const sc = (d, s, role) => `<div class="cmp-card"><p class="td-code">${role}</p><h3>${esc(d.loc.name)}</h3><div class="cmp-score"><b>${s.total}</b><span>/ 100 comfort and safety</span></div><div class="meter"><span style="width:${s.total}%;background:${s.total >= 70 ? 'var(--mint)' : s.total >= 50 ? 'var(--amber)' : 'var(--red)'}"></span></div></div>`;
   const li = (arr, icn, cls) => arr.map(t => `<li class="${cls}">${ic(icn)}<span>${esc(t)}</span></li>`).join('');
-  const dd = x => new Date(x + 'T12:00:00').toLocaleDateString();
-  $('#cmpOut').innerHTML = `<div class="cmp-verdict v-${v.level}"><span class="v-ic">${ic(v.level === 'good' ? 'check' : 'alert')}</span><div><p class="v-k">${r.purpose === 'trip' ? 'Trip advice' : 'Relocation advice'} · ${dd(win.start)} to ${dd(win.end)}</p><h2>${esc(v.head)}</h2><p>${esc(a.loc.short)} scores ${sa.total} and ${esc(b.loc.short)} scores ${sb.total} (${v.diff >= 0 ? '+' : '−'}${Math.abs(v.diff)} for your destination).</p></div></div>
-    <div class="cmp-cards">${sc(a, sa)}${sc(b, sb)}</div>
-    <div class="card"><div class="tbl-scroll"><table class="tbl cmp-tbl"><thead><tr><th></th><th>${esc(a.loc.short)} <small>(from)</small></th><th>${esc(b.loc.short)} <small>(to)</small></th></tr></thead><tbody>${rows}</tbody></table></div><p class="muted">Climate values are averages for the same dates over ${LAST_YEAR - 4}–${LAST_YEAR} (NASA POWER daily; rain from NASA GPM IMERG when the place is stored, otherwise POWER), so they describe what is typical, not a forecast${a.fcast || b.fcast ? ' (the short forecast shown is from Open-Meteo, not NASA)' : ''}. Air quality (PM2.5, all fine particles) is from NASA MERRA-2; earthquakes are from USGS. A check mark means clearly better.</p></div>
-    <div class="cmp-notes">${v.flags.length ? `<section class="card"><h3>${ic('alert')}Watch out</h3><ul class="notes">${li(v.flags, 'alert', 'bad')}</ul></section>` : ''}${(v.pros.length || v.cons.length) ? `<section class="card"><h3>${ic('compare')}Why</h3><ul class="notes">${li(v.pros, 'check', 'good')}${li(v.cons, 'alert', 'bad')}</ul></section>` : ''}${v.tips.length ? `<section class="card"><h3>${ic('bulb')}Tips for ${esc(b.loc.short)}</h3><ul class="notes">${li(v.tips, 'bulb', '')}</ul></section>` : ''}</div>
+  const dd = x => new Date(x + 'T12:00:00').toLocaleDateString(undefined, {month:'short', day:'numeric'});
+  const notes = [...v.flags.map(t => ['alert', 'bad', t]), ...v.pros.map(t => ['check', 'good', t]), ...v.cons.map(t => ['alert', 'bad', t])];
+  $('#cmpOut').innerHTML = `<div class="cmp-verdict v-${v.level}"><span class="v-ic">${ic(v.level === 'good' ? 'check' : 'alert')}</span><div><p class="v-k">${r.purpose === 'trip' ? 'Trip' : 'Move'} · ${dd(win.start)} to ${dd(win.end)}</p><h2>${esc(v.head)}</h2><p>${esc(a.loc.short)} scores ${sa.total} and ${esc(b.loc.short)} scores ${sb.total} out of 100.</p></div></div>
+    <div class="cmp-cards">${sc(a, sa, 'From')}${sc(b, sb, 'To')}</div>
+    <section class="card cmp-sec"><header class="cmp-sec-h"><h2>Side by side</h2></header><p class="cmp-idea">Both places on the same scale for your dates. A check mark shows the clearly better one.</p>
+      <div class="tbl-scroll"><table class="tbl cmp-tbl"><thead><tr><th></th><th>${esc(a.loc.short)} <small>(from)</small></th><th>${esc(b.loc.short)} <small>(to)</small></th></tr></thead><tbody>${rows}</tbody></table></div>
+      ${notes.length || v.tips.length ? `<div class="cmp-notes2">${notes.length ? `<ul class="notes">${notes.map(([i2, c2, t]) => li([t], i2, c2)).join('')}</ul>` : ''}${v.tips.length ? `<div><h3>${ic('bulb')}Tips for ${esc(b.loc.short)}</h3><ul class="notes">${li(v.tips, 'bulb', '')}</ul></div>` : ''}</div>` : ''}
+      <p class="muted cmp-src">Climate: NASA POWER daily, 30 years for your dates. Air (PM2.5): NASA MERRA-2. Earthquakes: USGS, M4.5+ within 200 km, ${LAST_YEAR - 9}–${LAST_YEAR}.</p></section>
+    ${outlookHtml(a, b)}
+    <div id="cmpPlan"></div>
     <div class="btn-row"><button class="btn-primary" data-act="cmp-open">${ic('scan')}Open ${esc(b.loc.short)} dashboard</button></div>
-    <div class="pl-root" id="cmpPlan"></div>
-    <p class="muted foot">This is general guidance from open climate data, not a safety guarantee. Always check official travel advisories, visa rules and current local conditions before you decide.</p>`;
+    <p class="muted foot">General guidance from open NASA climate data, not a safety guarantee. Check official travel advice before you decide.</p>`;
   loadPlanner(r);
 }
 
-/* ---------- compare: best time to go + seasonal risk calendar ---------- */
-const PL = {sel:'to', cache:{}, tok:0};
+/* ---------- compare: best time to go (destination) ---------- */
+const PL = {cache:{}, tok:0};
 async function loadPlanner(r){
   const host = $('#cmpPlan'); if(!host) return;
-  const tok = ++PL.tok, place = PL.sel === 'from' ? r.a.loc : r.b.loc, data = PL.sel === 'from' ? r.a : r.b;
-  const sw = `<div class="pl-switch" role="group" aria-label="Place to analyse"><span>Analyse:</span><button type="button" class="chip-opt" data-pl-sel="from" aria-pressed="${PL.sel === 'from'}">${esc(r.a.loc.short)} <small>(from)</small></button><button type="button" class="chip-opt" data-pl-sel="to" aria-pressed="${PL.sel === 'to'}">${esc(r.b.loc.short)} <small>(to)</small></button></div>`;
-  host.innerHTML = `${sw}<div id="omHost"></div><div id="mlHost"><div class="card cmp-load"><div class="spinner"></div><p>Training the forecast model for ${esc(place.short)} on NASA daily data. The first time for a place can take a minute…</p></div></div><div id="plHost"><div class="card cmp-load"><div class="spinner"></div><p>Loading the year of NASA climate for ${esc(place.short)}. A new place can take a minute…</p></div></div>`;
+  const tok = ++PL.tok, place = r.b.loc;
+  host.innerHTML = `<div class="card cmp-load"><div class="spinner"></div><p>Loading the year of NASA climate for ${esc(place.short)}…</p></div>`;
   const pk = PL.cache[place.id] ??= {};
   const days = Math.max(1, Math.round((new Date(r.win.end) - new Date(r.win.start)) / 864e5) + 1);
-  const range = PREF[r.pref].slice(0, 2);
-  /* section 1: ML forecast for the dates (independent of the climate sections, so each fills in as soon as it is ready) */
-  (async () => {
-    const mh = $('#mlHost');
-    try{
-      pk.ml ??= nasaPredict(place.lat, place.lon, r.win.start, r.win.end);
-      const ml = await pk.ml;
-      if(tok !== PL.tok) return;
-      const dm = pk.profile && pk.profile.dust_monthly ? pk.profile.dust_monthly[+r.win.start.slice(5, 7) - 1] : null;
-      const tips = {}; mh.innerHTML = mlHtml(ml, place.short, {range, purpose:r.purpose, dust:dm ?? data.dust}, tips); wirePlanner(mh, tips);
-    }catch(e){
-      delete pk.ml;
-      if(tok !== PL.tok) return;
-      const msg = (e && e.message) || 'unavailable', soft = /past|ahead|window/.test(msg);
-      mh.innerHTML = mlErrorHtml(place.short, soft ? msg + '.' : `The forecast model could not be trained for ${place.short} (${msg}). Try again in a moment.`, soft);
-    }
-  })();
-  /* section 0: Open-Meteo weather forecast for the next 7 days (not NASA), next to our model's first days; hidden if it cannot load */
-  (async () => {
-    try{
-      pk.om ??= getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${place.lat}&longitude=${place.lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max&forecast_days=7&timezone=auto`, 15000);
-      const [omR, mlR] = await Promise.allSettled([pk.om, (pk.ml ??= nasaPredict(place.lat, place.lon, r.win.start, r.win.end))]);
-      if(tok !== PL.tok || omR.status !== 'fulfilled' || !omR.value || !omR.value.daily) { if(omR.status !== 'fulfilled') delete pk.om; return; }
-      const el = $('#omHost'); if(el) el.innerHTML = nextDaysHtml(omR.value.daily, mlR.status === 'fulfilled' ? mlR.value.near : null, place.short);
-    }catch{ delete pk.om; }
-  })();
-  /* sections 2 and 3: best time to go and seasonal risk calendar */
   try{
-    if(!pk.profile){
-      const [prof, eo] = await Promise.allSettled([nasaClimateYear(place.lat, place.lon), eonetEvents(place.lat, place.lon, 300, {start:LAST_YEAR - 9, end:LAST_YEAR})]);
-      if(prof.status !== 'fulfilled') throw prof.reason;
-      pk.profile = prof.value; pk.eo = eonetByMonth(eo.status === 'fulfilled' ? eo.value : null);
-    }
+    pk.profile ??= await nasaClimateYear(place.lat, place.lon);
     if(tok !== PL.tok) return;
-    const plan = buildPlan(pk.profile, {range, purpose:r.purpose, lenWeeks:r.purpose === 'trip' ? Math.max(1, Math.min(13, Math.round(days / 7))) : 4, win:r.win});
-    const tips = {}, ph = $('#plHost');
-    ph.innerHTML = bestTimeHtml(plan, place.short, tips) + riskCalendarHtml(plan, place.short, pk.eo, r.win, tips);
-    wirePlanner(ph, tips);
+    const plan = buildPlan(pk.profile, {range:PREF[r.pref].slice(0, 2), purpose:r.purpose, lenWeeks:r.purpose === 'trip' ? Math.max(1, Math.min(13, Math.round(days / 7))) : 4, win:r.win});
+    const tips = {};
+    host.innerHTML = `<div class="pl-root">${bestTimeHtml(plan, place.short, tips)}</div>`;
+    wirePlanner(host, tips);
   }catch(e){
+    delete pk.profile;
     if(tok !== PL.tok) return;
-    $('#plHost').innerHTML = `<div class="card"><p class="td-exp">The yearly climate for ${esc(place.short)} could not be loaded (${esc((e && e.message) || 'unavailable')}). Try again in a moment.</p></div>`;
+    host.innerHTML = `<div class="card"><p class="td-exp">The yearly climate for ${esc(place.short)} could not be loaded (${esc((e && e.message) || 'unavailable')}). Try again in a moment.</p></div>`;
   }
 }
 /* ---------- wiring ---------- */
@@ -1196,7 +1159,6 @@ document.addEventListener('click', e => {
   const nav = t.closest('[data-nav]'); if(nav){ go(nav.dataset.nav); return; }
   const nl = t.closest('[data-nav-link]'); if(nl){ go(nl.dataset.navLink); return; }
   const sv = t.closest('[data-setview]'); if(sv){ setView(sv.dataset.setview); return; }
-  const ps = t.closest('[data-pl-sel]'); if(ps){ PL.sel = ps.dataset.plSel; if(CMP.res) loadPlanner(CMP.res); return; }
   const cp = t.closest('[data-cmp-pick]'); if(cp){ const l = findLoc(cp.dataset.id) || knownPlaces().find(x => x.id === cp.dataset.id); if(l){ CMP[cp.dataset.cmpPick] = l; CMP.res = null; $(cp.dataset.cmpPick === 'from' ? '#cmpFrom' : '#cmpTo').value = l.name; } return; }
   const b = t.closest('[data-act]'); if(!b) return;
   const act = b.dataset.act, id = b.dataset.id;

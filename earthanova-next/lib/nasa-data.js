@@ -89,6 +89,12 @@ export const nasaClimateYear = (lat, lon) => {
   return apiGet(`/climate-year?lat=${lat}&lon=${lon}`, 180000);
 };
 
+/* Climate outlook for travel dates: 30 years of NASA POWER daily data for the same days, trend-adjusted (server outlook.py). */
+export const nasaOutlook = (lat, lon, start, end) => {
+  if (isStatic()) return Promise.reject(new Error('this needs the live server'));
+  return apiGet(`/outlook?lat=${lat}&lon=${lon}&start=${start}&end=${end}`, 240000);
+};
+
 /* ML forecast for a date window (server trains a ridge/logistic model on NASA POWER daily data; slow the first time for a new place). */
 export const nasaPredict = (lat, lon, start, end) => {
   if (isStatic()) return Promise.reject(new Error('this needs the live server'));
@@ -172,7 +178,7 @@ export async function eonetEvents(lat, lon, radiusKm, period) {
     if (!best) continue;
     const mag = best.g.magnitudeValue != null ? `${best.g.magnitudeValue} ${best.g.magnitudeUnit || ''}`.trim() : null;
     byCat[cat].push({
-      title: e.title, date: (best.g.date || '').slice(0, 10), dist: Math.round(best.d), mag,
+      title: e.title, date: (best.g.date || '').slice(0, 10), dist: Math.round(best.d), mag, lat: best.g.coordinates[1], lon: best.g.coordinates[0],
       magValue: best.g.magnitudeValue, magUnit: best.g.magnitudeUnit,
       url: e.sources?.[0]?.url || e.link, src: e.sources?.map(x => x.id).join('/') || 'EONET'
     });

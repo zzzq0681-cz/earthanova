@@ -406,14 +406,14 @@ export default function EarthanovaMarkup() {
               <header className="page-h">
                 <div>
                   <h1><i data-ic="radar" />Risk Monitoring</h1>
-                  <p id="riskSub">One watch tower per natural hazard, all aimed at your scanned region. Hazard layers come from NASA EONET, MERRA-2, NASA-SSH and USGS.</p>
+                  <p id="riskSub">Six towers, one per natural hazard, all aimed at your scanned place.</p>
                 </div>
                 <div className="ph-actions">
                   <button className="btn-ghost" id="riskRescan"><i data-ic="refresh" />Rescan towers</button>
                 </div>
               </header>
               <div className="risk" id="riskWrap">
-                <div className="risk-main">
+                <div className="risk-top">
                   <div className="risk-scroll">
                     <div className="risk-stage" id="riskStage">
                       <div className="risk-map mosaic" id="riskMap" data-z="12" data-src="live" />
@@ -422,16 +422,33 @@ export default function EarthanovaMarkup() {
                     </div>
                     <p className="risk-hint">Swipe sideways to see all six towers</p>
                   </div>
-                  <div className="risk-viz" id="towerViz" aria-live="polite" />
+                  <aside className="card risk-glance" aria-labelledby="glH">
+                    <header className="card-h">
+                      <h2 id="glH"><i data-ic="radar" />At a glance</h2>
+                      <div className="counts" id="riskCounts" />
+                    </header>
+                    <p className="card-lead">Each tower checks one natural hazard. A longer bar means a higher risk score; the arrow marks a worsening trend. Pick one to see why.</p>
+                    <ul className="glance" id="towerList" />
+                  </aside>
                 </div>
-                <aside className="risk-side">
-                  <div className="risk-sum">
-                    <p>Tower status</p>
-                    <div className="counts" id="riskCounts" />
-                  </div>
-                  <ul className="tower-list" id="towerList" />
-                  <div className="tower-detail" id="towerDetail" />
-                </aside>
+                <section className="card risk-detail" id="towerDetail" aria-live="polite" />
+                <div className="risk-two">
+                  <section className="card" aria-labelledby="calH">
+                    <header className="card-h">
+                      <h2 id="calH"><i data-ic="calendar" />When in the year?</h2>
+                    </header>
+                    <p className="card-lead">Which months bring each hazard, so you know when to be careful.</p>
+                    <div id="riskCal" />
+                  </section>
+                  <section className="card" aria-labelledby="mapH">
+                    <header className="card-h">
+                      <h2 id="mapH"><i data-ic="pin" />Events near you</h2>
+                      <div className="right"><span className="tag" id="mapCount" /></div>
+                    </header>
+                    <p className="card-lead">Where earthquakes and storms, floods, landslides or volcanoes happened around your place in the study period.</p>
+                    <div id="riskEvents" />
+                  </section>
+                </div>
               </div>
               <div className="empty-state" id="riskEmpty" hidden>
                 <i data-ic="radar" />

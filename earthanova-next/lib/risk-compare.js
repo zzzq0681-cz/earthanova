@@ -1,0 +1,134 @@
+/* Compare: "What to expect on your dates" (NASA POWER daily, trend-adjusted climatology from /api/outlook).
+ * Risk Monitoring: hazard ranking, trend verdicts per hazard, "when in the year" calendar and the events map.
+ * Charts follow the same style as lib/detective.js (dv-* classes, shared tooltip via data-tip). */
+import {series, verdict, varById, mean, sgn, fmt, MON, MON_LONG} from './detective.js';
+
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const tip = (h, rows) => `data-tip="${esc(JSON.stringify({h, r:rows}))}"`;
+const phone = () => typeof window !== 'undefined' && window.innerWidth <= 640;
+const pc = x => x == null ? '—' : `${Math.round(x * 100)}%`;
+const C_LO = '#4C9BE8', C_HI = '#F0705A';
+
+/* ===================== COMPARE: outlook for the travel dates ===================== */
+export function outlookChart(rows){
+  const W = phone() ? 380 : 720, L = phone() ? 80 : 130, R = 18, T = 26, rowH = 76, H = T + rows.length * rowH + 30;
+  const vals = rows.flatMap(r => [r.ol.low.p10, r.ol.high.p90]), lo = Math.floor(Math.min(...vals) / 5) * 5 - (Math.min(...vals) % 5 < 1.5 ? 5 : 0), hi = Math.ceil(Math.max(...vals) / 5) * 5;
+  const X = v => L + (v - lo) / (hi - lo) * (W - L - R);
+  let g = '';
+  for(let v = lo; v <= hi; v += 5) g += `<line class="dv-grid" x1="${X(v)}" x2="${X(v)}" y1="${T - 6}" y2="${H - 26}"/><text class="dv-ax" x="${X(v)}" y="${H - 8}" text-anchor="middle">${v}°</text>`;
+  if(35 > lo && 35 < hi) g += `<line x1="${X(35)}" x2="${X(35)}" y1="${T - 10}" y2="${H - 26}" stroke="#FF6178" stroke-dasharray="4 4" stroke-width="1.4"/><text class="dv-ax" x="${X(35) + 4}" y="${T - 12}" fill="#FF8A9A">35° hot</text>`;
+  rows.forEach((r, i) => {
+    const y = T + i * rowH, band = (q, col, yy, label) => `<rect x="${X(q.p10).toFixed(1)}" y="${yy}" width="${Math.max(3, X(q.p90) - X(q.p10)).toFixed(1)}" height="16" rx="8" fill="${col}" fill-opacity=".38" stroke="${col}" stroke-width="1.4"/><line x1="${X(q.p50).toFixed(1)}" x2="${X(q.p50).toFixed(1)}" y1="${yy - 3}" y2="${yy + 19}" stroke="#EAF8FF" stroke-width="2.6" stroke-linecap="round"/><text class="dv-lbl" x="${(X(q.p90) + 8).toFixed(1)}" y="${yy + 12}" fill="${col}">${fmt(q.p50, 0)}°</text><rect class="dv-hit" x="${X(q.p10) - 4}" y="${yy - 4}" width="${X(q.p90) - X(q.p10) + 8}" height="24" ${tip(`${r.name}: ${label}`, [['typical', `${fmt(q.p50, 1)} °C`], ['8 days in 10', `${fmt(q.p10, 1)} to ${fmt(q.p90, 1)} °C`]])}/>`;
+    g += `<text class="dv-lbl" x="${L - 12}" y="${y + 20}" text-anchor="end" fill="#EAF8FF">${esc(r.name)}</text><text class="dv-ax" x="${L - 12}" y="${y + 36}" text-anchor="end">${esc(r.role)}</text>`;
+    g += band(r.ol.low, C_LO, y + 6, 'night low') + band(r.ol.high, C_HI, y + 32, 'afternoon high');
+    if(i < rows.length - 1) g += `<line class="dv-grid" x1="${L - 120}" x2="${W - R}" y1="${y + rowH - 8}" y2="${y + rowH - 8}"/>`;
+  });
+  return `<svg class="dv-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Night lows and afternoon highs to expect on your dates">${g}</svg>
+    <div class="dv-key"><span><i style="background:${C_LO}"></i>Night low</span><span><i style="background:${C_HI}"></i>Afternoon high</span><span class="muted">bar = 8 days in 10 · white tick = typical day</span></div>`;
+}
+export function outlookHtml(a, b){
+  const rows = [{name:a.loc.short, role:'from', ol:a.ol}, {name:b.loc.short, role:'to', ol:b.ol}];
+  const line = (label, f, better) => { const x = f(a.ol), y = f(b.ol), w = better ? better(a.ol, b.ol) : 0; return `<tr><th scope="row">${label}</th><td class="${w < 0 ? 'win' : ''}">${x}</td><td class="${w > 0 ? 'win' : ''}">${y}</td></tr>`; };
+  const diffP = (k, lowerBetter = true) => (p, q) => { const d = (q.odds[k] ?? 0) - (p.odds[k] ?? 0); return Math.abs(d) < .1 ? 0 : (lowerBetter ? (d < 0 ? 1 : -1) : (d > 0 ? 1 : -1)); };
+  const chk = o => o.check ? `<b>${pc(o.check.cover_high)}</b> of real afternoon highs fell inside the bar (target 80%), checked on ${o.check.years[0]}–${o.check.years[1]}` : 'not enough years to check';
+  return `<section class="card cmp-sec">
+    <header class="cmp-sec-h"><h2>What to expect on your dates</h2><span class="tag cyan">NASA POWER daily, ${a.ol.years[0]}–${a.ol.years[1]}</span></header>
+    <p class="cmp-idea">Nobody can forecast the exact weather weeks ahead. But 30 years of NASA data for the same days, moved to today's warmer climate, show what is likely.</p>
+    <figure class="cmp-fig">${outlookChart(rows)}</figure>
+    <div class="tbl-scroll"><table class="tbl cmp-tbl"><thead><tr><th></th><th>${esc(a.loc.short)} <small>(from)</small></th><th>${esc(b.loc.short)} <small>(to)</small></th></tr></thead><tbody>
+      ${line('Chance of a hot day (35 °C or more)', o => pc(o.odds.hot), diffP('hot'))}
+      ${line('Chance of a rainy day (1 mm or more)', o => pc(o.odds.wet), diffP('wet'))}
+      ${line('Chance of a cold night (5 °C or less)', o => pc(o.odds.cold), diffP('cold'))}
+      ${line('Typical rain over your dates', o => o.rain.median_total == null ? '—' : `${fmt(o.rain.median_total, 0)} mm`)}
+      ${line('Afternoons now vs 30 years ago', o => `${fmt(o.then_now.now_high, 1)} °C <small>vs ${fmt(o.then_now.then_high, 1)} °C (${o.then_now.then})</small>`)}
+    </tbody></table></div>
+    <details class="cmp-how"><summary>How reliable is this?</summary>
+      <p>We rebuilt the outlook for each of the last 10 years using only earlier years, then compared it with what really happened.</p>
+      <ul><li><b>${esc(a.loc.short)}:</b> ${chk(a.ol)}.</li><li><b>${esc(b.loc.short)}:</b> ${chk(b.ol)}.</li></ul>
+      <p class="muted">Method: same calendar days (±3) in each of the last 30 years, each shifted by the local warming trend, then the spread and the odds are counted. It describes likely conditions, not a forecast for one day.</p></details>
+  </section>`;
+}
+/* turn the outlook into the fields the comfort/safety score uses */
+export function climFromOutlook(o){
+  return {meanT:(o.high.mean + o.low.mean) / 2, hi:o.high.p50, lo:o.low.p50, rainPerDay:o.rain.per_day ?? 0, wetFrac:o.odds.wet ?? 0,
+    hotFrac:o.odds.hot, coldFrac:o.odds.frost, lenDays:o.window.days, rainTotal:o.rain.median_total ?? 0};
+}
+
+/* ===================== RISK MONITORING ===================== */
+/* the question each tower answers, in plain words */
+export const HZ_Q = {
+  quake:'How often does the ground shake nearby?',
+  heat:'Is it getting hotter here?',
+  drought:'Is the land getting drier?',
+  flood:'Are heavy rain, storms or floods a threat?',
+  dust:'How clean is the air?',
+  sea:'Is the sea rising here?'
+};
+/* trend verdict (same test as the dashboard) for the variable behind each tower */
+const HZ_VAR = {heat:'temp', drought:'soil', flood:'rain', dust:'pm25', sea:'sea'};
+export function hazardTrend(A, id){
+  const v = HZ_VAR[id]; if(!v) return null;
+  const sr = series(A, v); const vd = sr && verdict(sr); if(!vd) return null;
+  const bad = {heat:1, drought:-1, flood:1, dust:1, sea:1}[id], worse = vd.level !== 'none' && Math.sign(vd.t.slope) === bad;
+  return {vd, sr, worse, text:`${sr.v.short}: ${vd.word.toLowerCase()}`, years:`${sr.years[0]}–${sr.years[sr.years.length - 1]}`};
+}
+export function glanceHtml(HAZARDS, H, levels, sel, LEVEL, ic, A){
+  const order = HAZARDS.map((h, i) => i).sort((x, y) => (levels[y] === 'na') - (levels[x] === 'na') || H[HAZARDS[y].id].score - H[HAZARDS[x].id].score);
+  return order.map(i => { const h = HAZARDS[i], r = H[h.id], lv = levels[i], col = LEVEL[lv][1], tr = lv !== 'scanning' && hazardTrend(A, h.id);
+    return `<li><button class="gl-row" data-i="${i}" aria-pressed="${i === sel}"><span class="gl-ic" style="color:${col}">${ic(h.icon)}</span>
+      <span class="gl-t"><b>${esc(h.hazard)}</b><small>${esc(HZ_Q[h.id])}</small></span>
+      <span class="gl-bar" aria-hidden="true"><i style="width:${lv === 'scanning' ? 0 : r.score}%;background:${col}"></i></span>
+      <span class="lvl lvl-${lv}">${LEVEL[lv][0]}</span>${tr && tr.worse ? `<span class="gl-tr" title="${esc(tr.text)}">${ic('trend')}</span>` : '<span class="gl-tr"></span>'}</button></li>`; }).join('');
+}
+
+/* when in the year: one row per hazard, 12 months, darker = more of that hazard */
+export function calendarHtml(A){
+  const s = A?.nasa?.bundle?.series; if(!s) return '<div class="empty">No monthly NASA record for this place.</div>';
+  const last = +s.month[s.month.length - 1].slice(0, 4), from = last - 9;
+  const clim = (arr, f = x => x) => MON.map((_, m) => mean(s.month.map((ym, i) => (+ym.slice(0, 4) >= from && +ym.slice(5, 7) === m + 1 && arr?.[i] != null) ? f(arr[i], ym) : null)));
+  const dim = ym => new Date(+ym.slice(0, 4), +ym.slice(5, 7), 0).getDate();
+  const rows = [];
+  const tmax = clim(s.t2m_max);
+  if(tmax.some(x => x != null)) rows.push({id:'heat', name:'Heat', unit:'°C', note:'daytime high', vals:tmax, lvl:v => (v - 26) / 16, fmt:v => fmt(v, 0) + '°', col:'#F0705A'});
+  const rain = s.prectotcorr ? MON.map((_, m) => mean(s.month.map((ym, i) => (+ym.slice(0, 4) >= from && +ym.slice(5, 7) === m + 1 && s.prectotcorr[i] != null) ? s.prectotcorr[i] * dim(ym) : null))) : null;
+  if(rain && rain.some(x => x != null)){ const mx = Math.max(...rain); rows.push({id:'flood', name:'Heavy rain', unit:'mm', note:'rain per month', vals:rain, lvl:v => mx < 5 ? v / 60 : v / Math.max(mx, 60), fmt:v => fmt(v, 0), col:'#3FB8AF'}); }
+  const soil = clim(s.gwetroot, x => x * 100);
+  if(soil.some(x => x != null)) rows.push({id:'drought', name:'Dry soil', unit:'%', note:'soil wetness, lower is drier', vals:soil, lvl:v => (55 - v) / 40, fmt:v => fmt(v, 0) + '%', col:'#C8894B'});
+  if(A.air?.monthly_clim?.length === 12) rows.push({id:'dust', name:'Dusty air', unit:'µg/m³', note:'PM2.5', vals:A.air.monthly_clim, lvl:v => v / 45, fmt:v => fmt(v, 0), col:'#C9A27C'});
+  const eo = A.eonet?.byCat;
+  if(eo){ const cnt = Array(12).fill(0); ['severeStorms', 'floods', 'landslides'].forEach(k => (eo[k] || []).forEach(e => { const m = +String(e.date).slice(5, 7); if(m) cnt[m - 1]++; })); const mx = Math.max(...cnt);
+    if(mx > 0) rows.push({id:'storm', name:'Storm & flood events', unit:'events', note:'NASA EONET', vals:cnt, lvl:v => v / mx, fmt:v => v ? String(v) : '', col:'#7FB2FF'}); }
+  const cw = phone() ? 24 : 50, L = phone() ? 118 : 186, T = 22, rh = phone() ? 34 : 40, W = L + 12 * cw + 6, H = T + rows.length * rh + 4;
+  let g = MON.map((m, i) => `<text class="dv-ax" x="${L + i * cw + cw / 2}" y="14" text-anchor="middle">${phone() ? m[0] : m}</text>`).join('');
+  const hexA = (c, a) => { const n = parseInt(c.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a.toFixed(2)})`; };
+  rows.forEach((r, k) => { const y = T + k * rh;
+    g += `<text class="dv-lbl" x="${L - 10}" y="${y + rh / 2}" text-anchor="end" fill="#EAF8FF">${esc(r.name)}</text><text class="dv-ax" x="${L - 10}" y="${y + rh / 2 + 13}" text-anchor="end">${phone() ? '' : esc(r.note)}</text>`;
+    r.vals.forEach((v, m) => { const t = v == null ? 0 : Math.max(0, Math.min(1, r.lvl(v)));
+      g += `<rect x="${L + m * cw + 1}" y="${y + 2}" width="${cw - 2}" height="${rh - 4}" rx="6" fill="${v == null ? '#0E1E2C' : hexA(r.col, .08 + t * .85)}" ${v == null ? '' : tip(`${r.name}, ${MON_LONG[m]}`, [[r.note, `${r.id === 'storm' ? v : fmt(v, r.unit === '°C' ? 1 : 0)} ${r.unit}`]])}/>`;
+      if(!phone() && v != null) g += `<text class="dv-cal-v" x="${L + m * cw + cw / 2}" y="${y + rh / 2 + 4}" text-anchor="middle" fill="${t > .55 ? '#06111F' : '#CFE3EF'}" pointer-events="none">${r.fmt(v)}</text>`; }); });
+  return `<svg class="dv-svg dv-cal" viewBox="0 0 ${W} ${H}" role="img" aria-label="Hazards by month">${g}</svg>
+    <p class="muted cal-note">Averages for ${from}–${last} from NASA POWER, MERRA-2 and EONET. Darker means more of that hazard. Earthquakes have no season, so they are not shown.</p>`;
+}
+
+/* events near you: earthquakes (USGS) and NASA EONET events placed by direction and distance */
+export function eventsMapHtml(A){
+  const R0 = A.radiusKm, lat0 = A.loc.lat, lon0 = A.loc.lon, k = Math.cos(lat0 * Math.PI / 180);
+  const pts = [];
+  (A.quakes?.list || []).forEach(q => { if(q.lat == null) return; pts.push({kind:'quake', lat:q.lat, lon:q.lon, mag:q.mag, title:`M${q.mag.toFixed(1)} earthquake`, meta:`${new Date(q.time).toISOString().slice(0, 10)} · ${q.dist} km away`}); });
+  const KINDS = {severeStorms:['storm', 'Storm', '#7FB2FF'], floods:['flood', 'Flood', '#3FB8AF'], landslides:['slide', 'Landslide', '#C8894B'], volcanoes:['volcano', 'Volcano', '#FF6178']};
+  Object.entries(A.eonet?.byCat || {}).forEach(([cat, list]) => { const kd = KINDS[cat]; if(!kd) return; list.forEach(e => { if(e.lat == null) return; pts.push({kind:kd[0], lat:e.lat, lon:e.lon, title:`${kd[1]}: ${e.title}`, meta:`${e.date} · ${e.dist} km away`, col:kd[2]}); }); });
+  if(!pts.length) return {html:'<div class="empty">No earthquakes or NASA EONET events with a location in this radius and period.</div>', n:0};
+  const S = phone() ? 340 : 420, c = S / 2, rr = c - 26;
+  const P = p => { const dx = (p.lon - lon0) * 111.32 * k, dy = (p.lat - lat0) * 110.57, d = Math.hypot(dx, dy), f = Math.min(1, d / R0); const a = Math.atan2(dy, dx); return [c + Math.cos(a) * f * rr, c - Math.sin(a) * f * rr]; };
+  let g = `<circle cx="${c}" cy="${c}" r="${rr}" fill="rgba(79,209,232,.04)" stroke="rgba(79,209,232,.35)"/>`;
+  [.25, .5, .75].forEach(f => { g += `<circle cx="${c}" cy="${c}" r="${rr * f}" fill="none" stroke="rgba(145,174,194,.18)" stroke-dasharray="3 5"/>`; });
+  [.5, 1].forEach(f => { g += `<text class="dv-ax" x="${c + rr * f * .71 + 4}" y="${c + rr * f * .71 + 12}">${Math.round(R0 * f)} km</text>`; });
+  g += `<line x1="${c}" x2="${c}" y1="${c - rr - 6}" y2="${c + rr + 6}" stroke="rgba(145,174,194,.12)"/><line y1="${c}" y2="${c}" x1="${c - rr - 6}" x2="${c + rr + 6}" stroke="rgba(145,174,194,.12)"/><text class="dv-ax" x="${c}" y="12" text-anchor="middle">N</text>`;
+  pts.sort((p, q) => (q.mag || 0) - (p.mag || 0)).forEach(p => { const [x, y] = P(p);
+    g += p.kind === 'quake' ? `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(3 + Math.max(0, p.mag - 4) * 3.4).toFixed(1)}" fill="#FFB46B" fill-opacity=".55" stroke="#FFB46B" stroke-width="1.2" ${tip(p.title, [['', p.meta]])}/>`
+      : `<rect x="${(x - 5).toFixed(1)}" y="${(y - 5).toFixed(1)}" width="10" height="10" rx="2.5" transform="rotate(45 ${x.toFixed(1)} ${y.toFixed(1)})" fill="${p.col}" stroke="#06111F" stroke-width="1.2" ${tip(p.title, [['', p.meta]])}/>`; });
+  g += `<circle cx="${c}" cy="${c}" r="6" fill="#EAF8FF" stroke="#22D3EE" stroke-width="3"/>`;
+  const cnt = k2 => pts.filter(p => p.kind === k2).length, kinds = [['quake', 'Earthquakes (USGS)', '#FFB46B', 'circle'], ['storm', 'Storms', '#7FB2FF'], ['flood', 'Floods', '#3FB8AF'], ['slide', 'Landslides', '#C8894B'], ['volcano', 'Volcanoes', '#FF6178']].filter(x => cnt(x[0]));
+  return {n:pts.length, html:`<div class="map-wrap"><svg class="dv-svg dv-map" viewBox="0 0 ${S} ${S}" role="img" aria-label="${pts.length} events around the scanned place">${g}</svg>
+    <ul class="map-legend">${kinds.map(([k2, n, col, shape]) => `<li><i class="${shape === 'circle' ? 'dot' : 'dia'}" style="background:${col}"></i>${n}<b>${cnt(k2)}</b></li>`).join('')}<li class="muted">Bigger circle = stronger earthquake. The centre is your scanned place; rings show distance.</li></ul></div>`};
+}
