@@ -42,11 +42,11 @@ function summaryHtml(A, I, loc){
   const pts = [];
   if(vt) pts.push(['thermo', vt.level === 'none' ? `Temperature has no steady direction since ${yr[0]}.` : `Average temperature: ${changeText(varById('temp'), vt)} since ${yr[0]} on the trend line.`]);
   if(vr) pts.push(['drop', vr.level === 'real' ? `Rainfall is ${vr.t.slope > 0 ? 'rising' : 'falling'}: ${changeText(varById('rain'), vr)} a year since ${yr[0]}.` : 'Rainfall changes a lot from year to year, with no clear long-term trend.']);
-  pts.push(['wind', !A.aq ? 'Air-quality data is not loaded for this place yet.' : A.aq.pm25 <= 15 ? `The air has few fine particles (${A.aq.pm25} µg/m³ yearly average).` : A.aq.pm25 <= 35 ? `The air has a moderate level of fine particles (${A.aq.pm25} µg/m³). Sensitive people may notice on dusty days.` : `The air carries a lot of fine particles (${A.aq.pm25} µg/m³). Limit long outdoor exercise on bad days.`]);
+  pts.push(['wind', A.pending?.haz ? 'Loading air-quality data from NASA MERRA-2… it appears here in a moment.' : !A.aq ? 'Air-quality data is not available for this place.' : A.aq.pm25 <= 15 ? `The air has few fine particles (${A.aq.pm25} µg/m³ yearly average).` : A.aq.pm25 <= 35 ? `The air has a moderate level of fine particles (${A.aq.pm25} µg/m³). Sensitive people may notice on dusty days.` : `The air carries a lot of fine particles (${A.aq.pm25} µg/m³). Limit long outdoor exercise on bad days.`]);
   const sol = A.cur.solar ?? A.base.solar;
   if(sol != null) pts.push(['sun', sol >= 5 ? `Very sunny: ${sol.toFixed(1)} kWh of sunlight per square metre a day, great for solar power.` : sol >= 4 ? `A fair amount of sun for solar power (${sol.toFixed(1)} kWh/m² a day).` : `Sunshine is on the low side for solar power (${sol.toFixed(1)} kWh/m² a day).`]);
   const watch = I.hazardFlags.length ? `${I.hazardFlags.slice(0, 2).map(f => f.t).join('. ')}. Open Risk Monitoring for details.` : 'No natural-hazard warning signs in the screening.';
-  return `<p class="sum-head">${esc(head)}</p><ul class="sum-list">${pts.map(([i, t]) => `<li><span class="sum-ic">${C.ic(i)}</span><span>${esc(t)}</span></li>`).join('')}</ul>${callout(C.ic, I.hazardFlags.length ? 'warn' : 'ok', I.hazardFlags.length ? 'Watch out' : 'All clear', esc(watch))}`;
+  return `<p class="sum-head">${esc(head)}</p><ul class="sum-list">${pts.map(([i, t]) => `<li><span class="sum-ic">${C.ic(i)}</span><span>${esc(t)}</span></li>`).join('')}</ul>${(A.pending?.quakes || A.pending?.eonet) && !I.hazardFlags.length ? callout(C.ic, 'info', 'Checking natural hazards', 'Earthquakes and storm, flood and volcano events are still loading. This box updates on its own.', 'radar') : callout(C.ic, I.hazardFlags.length ? 'warn' : 'ok', I.hazardFlags.length ? 'Watch out' : 'All clear', esc(watch))}`;
 }
 const TOOLKIT = [
   ['Variable', 'One thing that is measured, such as temperature or rainfall. Each card on the case board is one variable.'],
@@ -76,7 +76,8 @@ export function renderBasic(A, I, loc){
   $('#sumBody').innerHTML = summaryHtml(A, I, loc);
   const vars = availableVars(A, false), yr = yearsOf(A);
   $('#caseLead').textContent = `Every card is one variable NASA measures at ${loc.short}${yr ? `, ${yr[0]} to ${yr[1]}` : ''}. Read what it means, look at its line, then check the verdict: a real trend, or could it be chance?`;
-  $('#caseGrid').innerHTML = vars.map(v => clueCard(A, v)).join('') || '<div class="empty">No long NASA record is loaded for this place.</div>';
+  const waiting = A.pending?.haz ? ['pm25', 'sea'].map(id => varById(id)).map(v => `<article class="clue clue-loading" style="--c:${v.color}"><header><span class="clue-ic">${C.ic(v.icon)}</span><div class="clue-t"><h3>${esc(v.name)}</h3><p>${esc(v.src)}</p></div></header><div class="load-box" role="status"><span class="spinner" aria-hidden="true"></span><div><b>Loading from NASA…</b><span>This card fills in on its own. A new place can take 1–2 minutes the first time.</span></div></div><p class="clue-def">${esc(v.def)}</p></article>`).join('') : '';
+  $('#caseGrid').innerHTML = (vars.map(v => clueCard(A, v)).join('') + waiting) || '<div class="empty">No long NASA record is loaded for this place.</div>';
   $('#caseKey').innerHTML = keyFinding(A, loc);
   $('#toolkit').innerHTML = toolkitHtml();
 }
@@ -117,7 +118,8 @@ function explorerHtml(A){
   if(!sr || sr.years.length < 8) return ctl + '<div class="empty">Pick at least 8 years with data for this variable.</div>';
   const fig = chart === 'trend' ? trendChart(sr, {ma:EX.ma}) : chart === 'anom' ? anomalyChart(sr) : chart === 'heat' ? heatmap(A, v, EX.from, EX.to) : chart === 'cycle' ? cycleChart(A, v, EX.from, EX.to) : decadeChart(sr);
   const cap = {trend:`Each dot is one ${EX.season === 'year' ? 'year' : seasonLabel(EX.season).toLowerCase()}. Orange: Sen's trend line (dashed when not significant), with its 95% range shaded.`, anom:`Bars show how far each year sits above or below the ${baselineOf(sr).label}.`, heat:'Each square is one month, coloured by how far it was from that calendar month’s average over the chosen years. Look for colour drifting over time.', cycle:'The average year in the earliest and the latest years of the range. The gap between the two shows which months changed most.', dec:'Each box holds the middle half of the yearly values in a decade; the white line is the median, dots are single years.'}[chart];
-  return ctl + `<div class="xp-body"><figure class="xp-fig"><div class="xp-fig-h"><b>${esc(v.name)}${EX.season !== 'year' ? `, ${esc(seasonLabel(EX.season).toLowerCase())}` : ''}</b>${chart === 'trend' ? `<label class="chk-inline"><input type="checkbox" data-ex="ma"${EX.ma ? ' checked' : ''}> 10-year running mean</label>` : ''}</div>${fig}<figcaption>${esc(cap)} <span class="muted">${esc(v.def)}</span></figcaption></figure>
+  const pend = ADV_A?.pending?.haz ? `<p class="pend-note">${C.ic('info')}<span>PM2.5 and sea level are still loading; they join the variable lists when they arrive.</span></p>` : '';
+  return ctl + pend + `<div class="xp-body"><figure class="xp-fig"><div class="xp-fig-h"><b>${esc(v.name)}${EX.season !== 'year' ? `, ${esc(seasonLabel(EX.season).toLowerCase())}` : ''}</b>${chart === 'trend' ? `<label class="chk-inline"><input type="checkbox" data-ex="ma"${EX.ma ? ' checked' : ''}> 10-year running mean</label>` : ''}</div>${fig}<figcaption>${esc(cap)} <span class="muted">${esc(v.def)}</span></figcaption></figure>
     <aside class="xp-side"><h3>Statistics</h3>${statsBlock(sr)}<button class="btn-ghost" data-ex-csv>${C.ic('download')}Download this series (CSV)</button></aside></div>`;
 }
 function vsHtml(A){

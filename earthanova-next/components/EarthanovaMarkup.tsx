@@ -248,6 +248,7 @@ export default function EarthanovaMarkup() {
                 </div>
               </div>
               <div className="cards" id="cards">
+                <div className="pend-host" />
                 {/* BASIC: plain language for students and the public */}
                 <article className="card summary" data-views="basic" aria-labelledby="sumH">
                   <header className="card-h">
@@ -416,6 +417,7 @@ export default function EarthanovaMarkup() {
                 </div>
               </header>
               <div className="risk" id="riskWrap">
+                <div className="pend-host" />
                 <div className="risk-top">
                   <div className="risk-scroll">
                     <div className="risk-stage" id="riskStage">

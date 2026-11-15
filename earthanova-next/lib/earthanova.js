@@ -169,20 +169,41 @@ async function analyzeNasa(loc, radiusKm, onStep, period){
   const bundle = await nasaLoad(hit.place.name).catch(e => { onStep('era5', false); throw e; });
   onStep('era5', true, 'NASA POWER');
   ['cmip', 'air'].forEach(k => onStep(k, true, 'not loaded yet'));
-  const hazP = Promise.allSettled([eonetEvents(loc.lat, loc.lon, radiusKm, period), usgsQuakes(loc, radiusKm, period), nasaHazards(hit.place.name)]);
-  let img = null;
-  try{ img = await waybackPair(loc.lat, loc.lon, period); onStep('img', true); }catch{ onStep('img', false); }
-  const [eon, qk, hz] = await hazP;
-  onStep('hazard', [eon, qk, hz].some(r => r.status === 'fulfilled'), 'NASA EONET · MERRA-2 · NASA-SSH · USGS');
-  const A = nasaBuildAnalysis(loc, radiusKm, bundle, img, period, hit, {mean, round, linreg});
-  A.eonet = eon.status === 'fulfilled' ? eon.value : null;
-  A.quakes = qk.status === 'fulfilled' ? qk.value : null;
-  A.dust = hz.status === 'fulfilled' ? hz.value.dust : null;
-  A.sea = hz.status === 'fulfilled' ? hz.value.sea : null;
-  A.air = hz.status === 'fulfilled' ? hz.value.air || null : null;
-  if(A.air?.annual?.length){ const r5 = A.air.annual.slice(-5); A.aq = {pm25:Math.round(mean(r5) * 10) / 10, years:r5.length, aod:A.air.aod_recent, comp:A.air.components_recent}; }
-  A.hazErr = hz.status === 'rejected' ? (hz.reason?.message || 'unavailable') : (hz.value?.error || null);
+  /* the dashboard opens now; imagery, events, earthquakes, air quality and sea level keep loading (see runBackground) */
+  const A = nasaBuildAnalysis(loc, radiusKm, bundle, null, period, hit, {mean, round, linreg});
+  Object.assign(A, {eonet:null, quakes:null, dust:null, sea:null, air:null, pending:{img:1, eonet:1, quakes:1, haz:1}});
+  Object.defineProperty(A, '_bg', {enumerable:false, value:{
+    img:waybackPair(loc.lat, loc.lon, period), eonet:eonetEvents(loc.lat, loc.lon, radiusKm, period),
+    quakes:usgsQuakes(loc, radiusKm, period), haz:nasaHazards(hit.place.name)}});
+  ['img', 'hazard'].forEach(k => onStep(k, true, 'continues in the background'));
   return A;
+}
+const PENDING_LABEL = {haz:'air quality and sea level', eonet:'storm, flood and volcano events', quakes:'earthquakes', img:'satellite imagery'};
+/* fill in each background part when it arrives, re-render what depends on it, and cache the scan once it is complete */
+function runBackground(A, key){
+  const bg = A._bg; if(!bg) return;
+  const done = k => {
+    if(!A.pending) return; delete A.pending[k];
+    if(!Object.keys(A.pending).length){ delete A.pending; try{ store.set(key, A); }catch{} }
+    if(S.A !== A) return;
+    S.I = interpret(A); S.H = hazardReadings(A, S.I);
+    if(k === 'img') renderDashboardCore();
+    if(S.view !== 'playful') renderView(S.view);                // the games do not use these data, so a running quiz is not reset
+    if(S.page === 'risk') renderRisk(true);
+    renderPendingBar();
+  };
+  bg.img.then(v => { A.img = v; }, () => {}).finally(() => done('img'));
+  bg.eonet.then(v => { A.eonet = v; }, () => {}).finally(() => done('eonet'));
+  bg.quakes.then(v => { A.quakes = v; }, () => {}).finally(() => done('quakes'));
+  bg.haz.then(v => { A.dust = v.dust; A.sea = v.sea; A.air = v.air || null; A.hazErr = v.error || null;
+    if(A.air?.annual?.length){ const r5 = A.air.annual.slice(-5); A.aq = {pm25:Math.round(mean(r5) * 10) / 10, years:r5.length, aod:A.air.aod_recent, comp:A.air.components_recent}; } },
+    e => { A.hazErr = e?.message || 'unavailable'; }).finally(() => done('haz'));
+}
+/* "Still loading" strip on the dashboard and the Risk page */
+function renderPendingBar(){
+  const p = S.A?.pending, keys = p ? Object.keys(p) : [];
+  const html = keys.length ? `<div class="pend-bar" role="status"><span class="spinner sm" aria-hidden="true"></span><span><b>Still loading:</b> ${keys.map(k => PENDING_LABEL[k]).join(', ')}. These parts fill in on their own${p.haz ? '; a new place can take 1–2 minutes the first time' : ''}.</span></div>` : '';
+  $$('.pend-host').forEach(el => { el.innerHTML = html; });
 }
 /* USGS earthquake catalogue (NASA has no earthquake catalogue; EONET lists none), labelled as USGS in the UI. */
 async function usgsQuakes(loc, radiusKm, period){
@@ -440,6 +461,14 @@ function dustSeaTowers(dust, sea, hzNote, air){
   return H;
 }
 function hazardReadings(A, I){
+  const H = hazardReadingsCore(A, I), P = A.pending || {};
+  const wait = (txt) => ({level:'scanning', score:0, headline:`Loading ${txt}…`, explain:'', metrics:[], items:[], pending:true});
+  if(P.quakes || P.eonet) H.quake = wait('earthquakes (USGS) and volcano reports (NASA EONET)');
+  if(P.eonet) H.flood = wait('storm, flood and landslide events (NASA EONET)');
+  if(P.haz){ H.dust = wait('air quality (NASA MERRA-2)'); H.sea = wait('sea level (NASA-SSH)'); }
+  return H;
+}
+function hazardReadingsCore(A, I){
   const q = A.quakes, H = {};
   const mq = q ? q.maxMag : null;
   H.quake = !q ? {level:'na', score:0, headline:'USGS data unavailable', explain:'The USGS catalogue could not be reached during this scan.', metrics:[], items:[]} : {
@@ -537,6 +566,7 @@ function renderTowerList(levels){
 function renderTowerDetail(){
   if(!S.H) return;
   const h = HAZARDS[S.hazard], r = S.H[h.id], lv = LEVEL[r.level], tr = hazardTrend(S.A, h.id);
+  if(r.pending){ $('#towerDetail').innerHTML = `<header class="rd-h"><span class="td-ic" style="color:${lv[1]}">${ic(h.icon)}</span><div class="grow"><p class="td-code">${h.code} · ${esc(h.name)}</p><h2>${esc(HZ_Q[h.id])}</h2></div><span class="lvl lvl-scanning">Loading</span></header>${loadingBox(r.headline, 'This tower fills in on its own as soon as the data arrives. A new place can take 1–2 minutes the first time.')}`; return; }
   let viz = {charts:[], analysis:[], note:''}, figs = '', tips = {};
   try{
     const pd = per(S.A); viz = towerViz(h.id, S.A, {years:pd.years, baseLabel:pd.baseLabel, curLabel:pd.curLabel});
@@ -554,14 +584,18 @@ function renderTowerDetail(){
     <p class="td-src">Source: ${esc(h.src)}. Screening only, not an official hazard warning.</p>`;
   wireHzCharts(el, tips);
 }
-function renderRisk(){
+function loadingBox(title, sub){ return `<div class="load-box" role="status"><span class="spinner" aria-hidden="true"></span><div><b>${esc(title)}</b>${sub ? `<span>${esc(sub)}</span>` : ''}</div></div>`; }
+function renderRisk(quiet){
   const has = !!S.A;
   $('#riskWrap').hidden = !has; $('#riskEmpty').hidden = has;
   if(!has) return;
   $('#riskSub').textContent = `${S.loc.name}, ${S.A.radiusKm} km around, ${per(S.A).label}. Six towers, one per natural hazard.`;
   refreshMosaics();
   try{ $('#riskCal').innerHTML = calendarHtml(S.A); }catch(e){ console.warn('calendar', e); }
-  try{ const m = eventsMapHtml(S.A); $('#riskEvents').innerHTML = m.html; $('#mapCount').textContent = `${m.n} event${m.n === 1 ? '' : 's'}`; }catch(e){ console.warn('map', e); }
+  try{ if(S.A.pending?.quakes || S.A.pending?.eonet){ $('#riskEvents').innerHTML = loadingBox('Loading earthquakes (USGS) and NASA EONET events…', 'The map appears when they arrive.'); $('#mapCount').textContent = 'loading'; }
+    else { const m = eventsMapHtml(S.A); $('#riskEvents').innerHTML = m.html; $('#mapCount').textContent = `${m.n} event${m.n === 1 ? '' : 's'}`; } }catch(e){ console.warn('map', e); }
+  renderPendingBar();
+  if(quiet){ const lv = levelsOf(S.H); renderRiskStage(lv); renderTowerList(lv); renderTowerDetail(); return; }
   const tok = ++S.riskTok, final = levelsOf(S.H), cur = HAZARDS.map(() => 'scanning');
   renderRiskStage(cur); renderTowerList(cur); renderTowerDetail();
   HAZARDS.forEach((_, i) => setTimeout(() => { if(tok !== S.riskTok || S.page !== 'risk') return; cur[i] = final[i]; renderRiskStage(cur); renderTowerList(cur); }, REDUCED ? 0 : 400 + i*300));
@@ -576,7 +610,7 @@ function renderDashboardCore(){
   $('#baAfterVals').textContent = `${A.cur.temp?.toFixed(1) ?? '—'} °C · ${A.cur.rain ?? '—'} mm/yr`;
   $('#baBeforeDate').textContent = A.img?.before ? `Imagery ${A.img.before.date}` : 'Current imagery';
   $('#baAfterDate').textContent = A.img?.after ? `Imagery ${A.img.after.date}` : 'Current imagery';
-  $('#baNote').textContent = A.img ? (A.img.same ? 'No newer Wayback imagery for this tile in the chosen period, so both panels show the same capture. Climate: NASA POWER.' : 'Imagery: Esri World Imagery Wayback (release dates; capture may be earlier). Climate: NASA POWER.') : 'Historical imagery unavailable, showing current imagery. Climate: NASA POWER.';
+  $('#baNote').textContent = A.pending?.img ? 'Loading historical satellite imagery… current imagery is shown meanwhile.' : A.img ? (A.img.same ? 'No newer Wayback imagery for this tile in the chosen period, so both panels show the same capture. Climate: NASA POWER.' : 'Imagery: Esri World Imagery Wayback (release dates; capture may be earlier). Climate: NASA POWER.') : 'Historical imagery unavailable, showing current imagery. Climate: NASA POWER.';
   renderNasaPanel();
   const ageMin = Math.round((Date.now() - A.fetchedAt)/60000);
   $('#sbChip span').textContent = ageMin < 2 ? 'Data ready' : `Cached · ${ageMin < 60 ? ageMin+' min' : Math.round(ageMin/60)+' h'} ago`;
@@ -803,18 +837,18 @@ async function scan(force = false){
     $('#spNote').textContent = 'Fetching NASA time series for this point…';
     try{
       A = await analyze(l, radius, (k, ok, note) => { if(token !== S.token) return; lis[k].className = ok ? 'done' : 'fail'; const sm = lis[k].querySelector('small'); if(!ok) sm.textContent = 'unavailable'; else if(typeof note === 'string') sm.textContent = note; done++; }, period);
-      store.set(key, A);
+      runBackground(A, key);
     }catch(e){
       if(token !== S.token) return;
       sp.classList.add('has-error'); $('#spErrMsg').textContent = `${e.message || 'Request failed.'}${e.userFacing ? ' Try Alexandria, Cairo, Aswan, Riyadh or Singapore.' : ' Check your internet connection and try again.'}`;
       $('#sbChip').className = 'chip bad'; $('#sbChip span').textContent = 'Error'; announce('Scan failed. ' + (e.message || '')); return;
     }
   }
-  const wait = minT - (performance.now() - t0); if(wait > 0) await sleep(wait);
+  const wait = (fresh ? minT : Math.min(minT, 900)) - (performance.now() - t0); if(wait > 0) await sleep(wait);
   if(token !== S.token) return;
   done = STEP_KEYS.length;
   S.A = A; addRecent(l);
-  showResults();
+  showResults(); renderPendingBar();
   if(S.page === 'risk') renderRisk();
   if(S.goto){ const g = S.goto; S.goto = null; go(g); }
 }
@@ -1062,10 +1096,12 @@ async function placeData(l, win){
   const q = `latitude=${l.lat}&longitude=${l.lon}`;
   const hzP = nasaEnsure(l.lat, l.lon, l.short || l.name).then(hit => nasaHazards(hit.place.name));   // slow the first time for a new place
   const today = isoDay(new Date()), far = isoDay(new Date(Date.now() + 15*864e5)), near = win.start <= far && win.end >= today;
+  /* air quality for a brand-new place can take minutes: wait at most 12 s, then compare without it (the server keeps loading it) */
+  const hzQuick = Promise.race([hzP, sleep(12000).then(() => { throw new Error('still loading'); })]);
   const [olR, eq, hz, fcR] = await Promise.allSettled([
     nasaOutlook(l.lat, l.lon, win.start, win.end),
     getJSON(`https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&${q}&maxradiuskm=200&starttime=${LAST_YEAR - 9}-01-01&minmagnitude=4.5&orderby=magnitude&limit=500`, 15000),
-    hzP,
+    hzQuick,
     /* Open-Meteo weather forecast (not NASA), only for trip days within the next 16 days */
     near ? getJSON(`https://api.open-meteo.com/v1/forecast?${q}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max&forecast_days=16&timezone=auto`, 15000) : Promise.resolve(null)
   ]);
@@ -1076,7 +1112,7 @@ async function placeData(l, win){
   const dustA = hz.status === 'fulfilled' ? hz.value.dust?.annual : null, airA = hz.status === 'fulfilled' ? hz.value.air?.annual : null;
   const fd = fcR.status === 'fulfilled' ? fcR.value?.daily : null;
   const fc = fd ? fd.time.map((d, i) => ({d, hi:fd.temperature_2m_max[i], lo:fd.temperature_2m_min[i], rain:fd.precipitation_sum?.[i], pop:fd.precipitation_probability_max?.[i]})).filter(f => f.d >= win.start && f.d <= win.end && f.hi != null) : null;
-  return {loc:l, ol, clim, quakes, fc, dust:dustA?.length ? mean(dustA.slice(-5)) : null, pm:airA?.length >= 5 ? mean(airA.slice(-5)) : null, elev:null};
+  return {loc:l, ol, clim, quakes, fc, airLoading:hz.status !== 'fulfilled' && hz.reason?.message === 'still loading', dust:dustA?.length ? mean(dustA.slice(-5)) : null, pm:airA?.length >= 5 ? mean(airA.slice(-5)) : null, elev:null};
 }
 function scorePlace(d, pref, purpose){
   const c = d.clim, [lo, hi] = PREF[pref], dist = c.meanT < lo ? lo - c.meanT : c.meanT > hi ? c.meanT - hi : 0;
@@ -1094,7 +1130,7 @@ const CMP_METRICS = [
   ['comfort', 'Typical temperature', d => `${d.clim.meanT.toFixed(1)} °C <small>(day ${d.clim.hi.toFixed(0)} · night ${d.clim.lo.toFixed(0)})</small>`],
   ['rain', 'Rain in your dates', d => `${d.clim.rainTotal.toFixed(0)} mm <small>(${Math.round(d.clim.wetFrac * 100)}% rainy days)</small>`],
   ['extreme', 'Extreme heat / cold days', d => `${Math.round(d.clim.hotFrac * 100)}% hot · ${Math.round(d.clim.coldFrac * 100)}% freezing`],
-  ['air', 'Air quality (PM2.5, yearly mean)', d => d.pm != null ? `${d.pm.toFixed(1)} µg/m³` : d.dust == null ? 'No data' : `${d.dust.toFixed(1)} µg/m³ <small>(dust only)</small>`],
+  ['air', 'Air quality (PM2.5, yearly mean)', d => d.pm != null ? `${d.pm.toFixed(1)} µg/m³` : d.airLoading ? '<span class="muted">Still loading from NASA, compare again in a minute</span>' : d.dust == null ? 'No data' : `${d.dust.toFixed(1)} µg/m³ <small>(dust only)</small>`],
   ['seismic', 'Earthquake activity', d => d.quakes ? `${d.quakes.perYear.toFixed(1)} M4.5+ / yr${d.quakes.max ? ` <small>(max M${d.quakes.max.toFixed(1)})</small>` : ''}` : 'No data'],
   ['altitude', 'Altitude', d => d.elev == null ? '—' : `${Math.round(d.elev)} m`]
 ];

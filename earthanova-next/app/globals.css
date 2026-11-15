@@ -1298,3 +1298,18 @@ body:is([data-page="plans"],[data-page="profile"],[data-page="tracking"],[data-p
 .case-pre .clue-fig figcaption{padding:0 2px}
 .quiz-fb .case-ev,.quiz-fb .callout,.quiz-fb>p{justify-self:stretch;width:100%;box-sizing:border-box}
 .quiz-fb .case-ev .dv-svg{max-width:760px}
+
+/* ================= background loading ================= */
+.spinner.sm{width:16px;height:16px;border-width:2px}
+.pend-host:empty{display:none}
+.pend-bar{display:flex;align-items:center;gap:10px;padding:9px 14px;border-radius:12px;border:1px solid rgba(79,209,232,.4);background:rgba(79,209,232,.08);font-size:13.5px;color:var(--ink)}
+.pend-bar b{color:var(--cyan)}
+.load-box{display:flex;align-items:center;gap:12px;padding:14px;border-radius:12px;border:1px dashed rgba(79,209,232,.45);background:rgba(79,209,232,.05)}
+.load-box b{display:block;font:600 14px var(--f-head);color:var(--ink)}
+.load-box span:not(.spinner){display:block;font-size:12.5px;color:var(--ink-2);margin-top:2px}
+.load-box .spinner{flex:none}
+.clue-loading{border-top-style:dashed}
+.clue-loading .clue-def{opacity:.75}
+.pend-note{display:flex;gap:8px;align-items:center;margin:0 0 10px!important;font-size:12.5px!important;color:var(--ink-2)!important}
+.pend-note svg.ic{width:15px;height:15px;color:var(--cyan)}
+#riskWrap>.pend-host{margin:0}

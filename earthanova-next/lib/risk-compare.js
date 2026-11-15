@@ -169,7 +169,7 @@ export function calendarHtml(A){
       g += `<rect x="${L + m * cw + 1}" y="${y + 2}" width="${cw - 2}" height="${rh - 4}" rx="6" fill="${v == null ? '#0E1E2C' : hexA(r.col, .08 + t * .85)}" ${v == null ? '' : tip(`${r.name}, ${MON_LONG[m]}`, [[r.note, `${r.id === 'storm' ? v : fmt(v, r.unit === '°C' ? 1 : 0)} ${r.unit}`]])}/>`;
       if(!phone() && v != null) g += `<text class="dv-cal-v" x="${L + m * cw + cw / 2}" y="${y + rh / 2 + 4}" text-anchor="middle" fill="${t > .55 ? '#06111F' : '#CFE3EF'}" pointer-events="none">${r.fmt(v)}</text>`; }); });
   return `<svg class="dv-svg dv-cal" viewBox="0 0 ${W} ${H}" role="img" aria-label="Hazards by month">${g}</svg>
-    <p class="muted cal-note">Averages for ${from}–${last} from NASA POWER, MERRA-2 and EONET. Darker means more of that hazard. Earthquakes have no season, so they are not shown.</p>`;
+    <p class="muted cal-note">Averages for ${from}–${last} from NASA POWER, MERRA-2 and EONET. Darker means more of that hazard. Earthquakes have no season, so they are not shown.${A.pending?.haz || A.pending?.eonet ? ' <b>Dusty-air and storm rows are still loading and appear here on their own.</b>' : ''}</p>`;
 }
 
 /* events near you: earthquakes (USGS) and NASA EONET events placed by direction and distance */
