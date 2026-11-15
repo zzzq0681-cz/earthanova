@@ -150,6 +150,10 @@ async function reverseName(lat, lon){
   try{
     const j = await getJSON(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`, 10000);
     const place = j.city || j.locality, ctry = j.countryName;
+    if(!j.countryCode && !j.city){                                  // no country: open sea or ocean
+      const sea = (j.localityInfo?.informative || []).map(x => x.name).find(n => /ocean|sea|gulf|bay|strait|channel/i.test(n || '')) || j.locality || 'Open water';
+      return {name:sea, short:sea, water:true};
+    }
     if(place && ctry) return {name:`${place}, ${ctry}`, short:place};
     if(ctry) return {name:ctry, short:ctry};
     if(place) return {name:place, short:place};
@@ -794,8 +798,11 @@ async function selectPoint(lat, lon){
   const r = await reverseName(l.lat, l.lon);
   if(S.loc.id !== l.id) return;
   S.loc = {...S.loc, ...(r || {name:`Custom Area (${fmtLat(lat)}, ${fmtLon(lon)})`, short:'Custom Area'})}; fillLocation();
+  if(r?.water) waterNotice(S.loc.name);
 }
-function requestScan(){ scan(); }
+const WATER_MSG = n => `${n ? n + ' is' : 'This point is'} open water. NASA land data such as soil wetness does not exist over the sea, so the analysis would be meaningless. Pick a place on land.`;
+function waterNotice(name){ $('#popSub').textContent = 'Open water: NASA land data does not exist here. Pick a place on land.'; toast(WATER_MSG(name)); announce(WATER_MSG(name)); }
+function requestScan(){ if(S.loc?.water){ showDialog({title:'Pick a place on land', body:`<p>${esc(WATER_MSG(S.loc.name))}</p>`, actions:[{label:'OK, pick another place', cls:'btn-primary'}]}); return; } scan(); }
 /* ---------- study period controls ---------- */
 const YEAR_MIN = 2000;
 function fillYears(sel, from, to, val){ sel.innerHTML = yrs(from, to).map(y => `<option>${y}</option>`).join(''); sel.value = String(val); }
@@ -840,7 +847,8 @@ async function scan(force = false){
       runBackground(A, key);
     }catch(e){
       if(token !== S.token) return;
-      sp.classList.add('has-error'); $('#spErrMsg').textContent = `${e.message || 'Request failed.'}${e.userFacing ? ' Try Alexandria, Cairo, Aswan, Riyadh or Singapore.' : ' Check your internet connection and try again.'}`;
+      const water = /open water/i.test(e.message || '');
+      sp.classList.add('has-error'); $('#spErrMsg').textContent = `${e.message || 'Request failed.'}${water ? '' : e.userFacing ? ' Try Alexandria, Cairo, Aswan, Riyadh or Singapore.' : ' Check your internet connection and try again.'}`;
       $('#sbChip').className = 'chip bad'; $('#sbChip span').textContent = 'Error'; announce('Scan failed. ' + (e.message || '')); return;
     }
   }
@@ -848,6 +856,7 @@ async function scan(force = false){
   if(token !== S.token) return;
   done = STEP_KEYS.length;
   S.A = A; addRecent(l);
+  setView('basic', false);   // every new scan opens on the Basic view; the visitor can switch afterwards
   showResults(); renderPendingBar();
   if(S.page === 'risk') renderRisk();
   if(S.goto){ const g = S.goto; S.goto = null; go(g); }
@@ -999,6 +1008,9 @@ function openReport(rep, autoPrint, pre){
 }
 
 /* ---------- search ---------- */
+/* GeoNames feature codes for open water (Open-Meteo search): these are never offered as places to analyse */
+const WATER_CODES = new Set(['OCN', 'SEA', 'SEAS', 'GULF', 'BAY', 'BAYS', 'STRT', 'SD', 'CHN', 'CHNM', 'CHNN', 'LGN', 'COVE', 'INLT']);
+const notWater = r => !WATER_CODES.has(r.feature_code);
 let searchT, searchSeq = 0, searchItems = [], searchIdx = -1;
 const sInput = $('#searchInput'), sList = $('#searchResults');
 function closeSearch(){ sList.classList.remove('open'); sInput.setAttribute('aria-expanded','false'); searchIdx = -1; }
@@ -1015,7 +1027,7 @@ sInput.addEventListener('input', () => {
     try{
       const j = await getJSON(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=6&language=en`, 10000);
       if(seq !== searchSeq) return;
-      searchItems = (j.results || []).map(r => ({name:`${r.name}, ${r.country || ''}`.replace(/, $/,''), short:r.name, admin:r.admin1, country:r.country, lat:r.latitude, lon:r.longitude}));
+      searchItems = (j.results || []).filter(notWater).map(r => ({name:`${r.name}, ${r.country || ''}`.replace(/, $/,''), short:r.name, admin:r.admin1, country:r.country, lat:r.latitude, lon:r.longitude}));
       searchIdx = searchItems.length ? 0 : -1; renderSearch();
     }catch{ if(seq === searchSeq){ sList.innerHTML = '<li class="muted">Search unavailable — check your connection.</li>'; } }
   }, 280);
@@ -1053,7 +1065,7 @@ function placePicker(inp, list, onPick){
       const my = ++seq; list.hidden = false; list.innerHTML = '<li class="muted">Searching…</li>';
       try{
         const j = await getJSON(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=6&language=en`, 10000); if(my !== seq) return;
-        items = (j.results || []).map(r => ({name:`${r.name}, ${r.country || ''}`.replace(/, $/, ''), short:r.name, admin:r.admin1, country:r.country, lat:r.latitude, lon:r.longitude}));
+        items = (j.results || []).filter(notWater).map(r => ({name:`${r.name}, ${r.country || ''}`.replace(/, $/, ''), short:r.name, admin:r.admin1, country:r.country, lat:r.latitude, lon:r.longitude}));
         list.innerHTML = items.length ? items.map((r, i) => `<li data-i="${i}"><b>${esc(r.short)}</b><span>${esc([r.admin, r.country].filter(Boolean).join(', '))}</span></li>`).join('') : '<li class="muted">No places found.</li>';
       }catch{ if(my === seq) list.innerHTML = '<li class="muted">Search unavailable. Check your connection.</li>'; }
     }, 280);
@@ -1094,7 +1106,8 @@ function renderCompare(){
 const mdNum = d => (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
 async function placeData(l, win){
   const q = `latitude=${l.lat}&longitude=${l.lon}`;
-  const hzP = nasaEnsure(l.lat, l.lon, l.short || l.name).then(hit => nasaHazards(hit.place.name));   // slow the first time for a new place
+  const ensP = nasaEnsure(l.lat, l.lon, l.short || l.name);
+  const hzP = ensP.then(hit => nasaHazards(hit.place.name));   // slow the first time for a new place
   const today = isoDay(new Date()), far = isoDay(new Date(Date.now() + 15*864e5)), near = win.start <= far && win.end >= today;
   /* air quality for a brand-new place can take minutes: wait at most 12 s, then compare without it (the server keeps loading it) */
   const hzQuick = Promise.race([hzP, sleep(12000).then(() => { throw new Error('still loading'); })]);
@@ -1105,6 +1118,8 @@ async function placeData(l, win){
     /* Open-Meteo weather forecast (not NASA), only for trip days within the next 16 days */
     near ? getJSON(`https://api.open-meteo.com/v1/forecast?${q}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max&forecast_days=16&timezone=auto`, 15000) : Promise.resolve(null)
   ]);
+  const ens = await ensP.then(() => null, e => e);
+  if(ens && /open water/i.test(ens.message || '')) throw new Error(WATER_MSG(l.short || l.name));
   if(olR.status !== 'fulfilled') throw new Error(`NASA climate history for ${l.short} could not be loaded${olR.reason?.message ? ` (${olR.reason.message})` : ''}.`);
   const ol = olR.value, clim = climFromOutlook(ol);
   const f = eq.status === 'fulfilled' ? eq.value.features || [] : null;
@@ -1169,7 +1184,7 @@ async function runCompare(){
   try{
     const [a, b] = await Promise.all([placeData(CMP.from, win), placeData(CMP.to, win)]);
     CMP.res = {a, b, win, purpose:CMP.purpose, pref:CMP.pref, at:Date.now()}; showCompare(CMP.res);
-  }catch(ex){ $('#cmpOut').innerHTML = ''; err.textContent = (ex.message || 'Comparison failed.') + ' Check your connection and try again.'; }
+  }catch(ex){ $('#cmpOut').innerHTML = ''; err.textContent = (ex.message || 'Comparison failed.') + (/open water/i.test(ex.message || '') ? '' : ' Check your connection and try again.'); }
 }
 function showCompare(r){
   const {a, b, win} = r, sa = scorePlace(a, r.pref, r.purpose), sb = scorePlace(b, r.pref, r.purpose), v = advise(a, b, sa, sb, win, r.purpose);
@@ -1281,7 +1296,7 @@ document.addEventListener('keydown', e => { if(e.key === 'Escape'){ if(!$('#dlg'
 initPeriodControls();
 /* accounts were removed: clear what older versions kept in this browser (accounts, passwords, plans, account tokens) */
 try{ Object.keys(localStorage).filter(k => k === 'es:users' || k === 'es:session' || /^es:(tok|sub|orgreq|reports|view):u/.test(k)).forEach(k => localStorage.removeItem(k)); }catch{}
-setView(store.get('es:view', 'basic'), false);
+setView('basic', false);   // every visit starts with the Basic view
 initViews({ic, store, toast, place:() => S.loc});
 startSession();
 initGlobe();
