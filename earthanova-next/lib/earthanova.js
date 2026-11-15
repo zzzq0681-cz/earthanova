@@ -4,7 +4,7 @@
 import Globe from 'globe.gl';
 import {towerViz, renderChart as renderHzChart, wireCharts as wireHzCharts} from './hazard-charts.js';
 import {buildPlan, bestTimeHtml, wirePlanner} from './compare-planner.js';
-import {outlookHtml, forecastSection, climFromOutlook, HZ_Q, hazardTrend, glanceHtml, calendarHtml, eventsMapHtml} from './risk-compare.js';
+import {outlookHtml, forecastSection, climFromOutlook, HZ_Q, HZ_TIPS, hazardTrend, glanceHtml, calendarHtml, eventsMapHtml, callout, topConcern} from './risk-compare.js';
 import {initViews, renderBasic, renderAdvanced as renderAdvViews, renderPlayful as renderPlayViews} from './views.js';
 import {VARS, series as dvSeries, verdict as dvVerdict, fmt as dvFmt, sgn as dvSgn, pTxt} from './detective.js';
 import {eonetEvents, nasaHazards, nasaOutlook, nasaClimateYear, apiBase, nasaFind, nasaEnsure, nasaLoad, nasaBuildAnalysis, isStatic, reportUrl} from './nasa-data.js';
@@ -30,6 +30,7 @@ const CACHE_VER = 'es:v4-nasa:';
 
 /* ---------- icons ---------- */
 const P = {
+  globe:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M3 12h18 M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9s1.3-6.4 3.8-9z',
   home:'M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z',
   pin:'M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z M12 7.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z',
   radar:'M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14M8 8a5.5 5.5 0 0 0 0 8M16 8a5.5 5.5 0 0 1 0 8M12 10.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z',
@@ -347,6 +348,19 @@ function updateGlobe(instant){
     world.ringsData([l]).htmlElementsData([l]).labelsData(S.state === 'selected' ? globeLabels().filter(p => p.id !== l.id) : []);
     world.pointOfView({lat:l.lat, lng:l.lon, altitude:S.state === 'selected' ? 1.9 : 1.42}, dur);
   }
+  globeInteractive();
+}
+/* the globe can be turned and zoomed only while choosing a place on the home page; after a scan it stays fixed on the target */
+function globeInteractive(){
+  if(!world) return;
+  const c = world.controls(), on = S.page === 'home' && (S.state === 'idle' || S.state === 'selected' || S.state === 'intro');
+  c.enableRotate = on; c.enableZoom = on; c.enablePan = false;
+  $('#globe').classList.toggle('is-locked', !on);
+}
+/* "Scan another place": back to the globe with nothing selected */
+function newScan(){
+  S.token++; S.riskTok++; setPage('home'); setState('idle');
+  announce('Pick a new place on the globe or search for one, then scan it.');
 }
 
 /* ---------- imagery mosaics ---------- */
@@ -441,7 +455,7 @@ function hazardReadings(A, I){
     score:Math.round(clamp(Math.max((dHot ?? 0) / 15, (dT ?? 0) / 1) * 100)),
     headline:dT != null && dT >= 0.3 ? `Warming ${sgn(dT)} °C vs ${per(A).baseLabel}` : 'No strong warming signal',
     explain:`Compares ${per(A).curLabel} with the ${per(A).baseLabel} baseline. Rated moderate at +0.5 °C or +5 hot days a year, and high at +1 °C or +15 hot days (a hot day is ${A.hotBase} °C or more).`,
-    metrics:[['Temperature change', sgn(dT) + ' °C'], ...(A.base.hot != null ? [[`Days ≥ ${A.hotBase} °C`, `${A.base.hot} → ${A.cur.hot ?? '—'} / yr`]] : []), ['Trend', A.trend ? sgn(A.trend.slope * 10, 2) + ' °C per decade' : 'n/a']], items:[]};
+    metrics:[['Temperature change', sgn(dT) + ' °C'], ...(A.base.hot != null ? [[`Days ≥ ${A.hotBase} °C`, `${A.base.hot} → ${A.cur.hot ?? '—'} / yr`]] : []), ['Long-term trend', (() => { const sr = dvSeries(A, 'temp'), vd = sr && dvVerdict(sr); return vd ? `${dvSgn(vd.t.slope * 10, 2)} °C per decade (${sr.years[0]}–${sr.years[sr.years.length - 1]})` : 'n/a'; })()]], items:[]};
   const dr = I.dRain, ds = I.drySoil ? null : I.dSoil, arid = A.base.rain != null && A.base.rain < 150;
   H.drought = (dr == null && ds == null) ? {level:'na', score:0, headline:'No rainfall record', explain:'NASA POWER soil wetness and NASA GPM IMERG rainfall were not available.', metrics:[], items:[]} : {
     level:((dr ?? 0) <= -25 || (ds ?? 0) <= -25) ? 'high' : ((dr ?? 0) <= -15 || (ds ?? 0) <= -15) ? 'moderate' : 'low',
@@ -514,6 +528,10 @@ function renderTowerList(levels){
   $('#towerList').innerHTML = glanceHtml(HAZARDS, S.H, levels, S.hazard, LEVEL, ic, S.A);
   $$('#towerList .gl-row').forEach(b => b.addEventListener('click', () => selectHazard(+b.dataset.i)));
   const n = k => levels.filter(l => l === k).length;
+  const top = levels.includes('scanning') ? null : topConcern(HAZARDS, S.H, levels);
+  $('#riskTop').innerHTML = !top ? '' : top.r.score < 34 && top.lv === 'low'
+    ? callout(ic, 'ok', 'Top concern', '<b>No hazard stands out here.</b> All towers read low in this screening.')
+    : callout(ic, top.lv === 'high' ? 'warn' : 'key', 'Top concern', `<b>${esc(top.h.hazard)}</b>: ${esc(top.r.headline)}.`, top.h.icon);
   $('#riskCounts').innerHTML = levels.includes('scanning') ? '<span class="lvl lvl-scanning">Scanning…</span>' : `<span class="lvl lvl-high">${n('high')} high</span><span class="lvl lvl-moderate">${n('moderate')} moderate</span><span class="lvl lvl-low">${n('low')} low</span>${n('na') ? `<span class="lvl lvl-na">${n('na')} no data</span>` : ''}`;
 }
 function renderTowerDetail(){
@@ -529,6 +547,7 @@ function renderTowerDetail(){
   el.innerHTML = `<header class="rd-h"><span class="td-ic" style="color:${lv[1]}">${ic(h.icon)}</span><div class="grow"><p class="td-code">${h.code} · ${esc(h.name)}</p><h2>${esc(HZ_Q[h.id])}</h2></div><span class="lvl lvl-${r.level}">${lv[0]}</span></header>
     <div class="rd-sum"><div><p class="td-head">${esc(r.headline)}</p>${stamp}<div class="meter" role="img" aria-label="Risk score ${r.score} out of 100"><span style="width:${r.score}%;background:${lv[1]}"></span></div><small class="muted">Risk score ${r.score} / 100</small></div>
       ${r.metrics.length ? `<div class="kv">${r.metrics.map(m => `<div><span>${esc(m[0])}</span><b>${esc(m[1])}</b></div>`).join('')}</div>` : ''}</div>
+    ${r.level !== 'na' && HZ_TIPS[h.id] ? callout(ic, 'tip', 'What you can do', esc(r.level === 'low' ? HZ_TIPS[h.id].lo : HZ_TIPS[h.id].hi)) : ''}
     ${viz.charts.length ? `<div class="hz-grid n${Math.min(viz.charts.length, 2)}">${figs}${viz.analysis.length ? `<section class="hz-card hz-ana"><h4>What the data says</h4><ul class="hz-analysis">${viz.analysis.map(t => `<li>${esc(t)}</li>`).join('')}</ul></section>` : ''}</div>` : (r.level === 'na' ? '' : '<p class="td-exp">No chart is available for this tower with the data loaded.</p>')}
     <div class="rd-more"><details><summary>How is this rated?</summary><p class="td-exp">${esc(r.explain)}</p>${viz.note ? `<p class="td-exp">${esc(viz.note)}</p>` : ''}</details>
     ${r.items.length ? `<details><summary>Recent events (${r.items.length})</summary><ul class="list">${r.items.map(e => `<li><div class="grow"><b>${esc(e.title)}</b><span>${esc(e.meta)}</span></div>${e.url ? `<a class="link-btn" href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.tag || 'USGS')}</a>` : ''}</li>`).join('')}</ul></details>` : ''}</div>
@@ -706,6 +725,7 @@ function setPage(p){
   S.page = p; document.body.dataset.page = p;
   $$('.topnav [data-nav]').forEach(b => b.toggleAttribute('aria-current', b.dataset.nav === p));
   $$('.topnav [aria-current]').forEach(b => b.setAttribute('aria-current', 'page'));
+  globeInteractive();
   requestAnimationFrame(() => { sizeGlobe(); refreshMosaics(); });
 }
 function goHome(){
@@ -1122,12 +1142,11 @@ function showCompare(r){
   const sc = (d, s, role) => `<div class="cmp-card"><p class="td-code">${role}</p><h3>${esc(d.loc.name)}</h3><div class="cmp-score"><b>${s.total}</b><span>/ 100 comfort and safety</span></div><div class="meter"><span style="width:${s.total}%;background:${s.total >= 70 ? 'var(--mint)' : s.total >= 50 ? 'var(--amber)' : 'var(--red)'}"></span></div></div>`;
   const li = (arr, icn, cls) => arr.map(t => `<li class="${cls}">${ic(icn)}<span>${esc(t)}</span></li>`).join('');
   const dd = x => new Date(x + 'T12:00:00').toLocaleDateString(undefined, {month:'short', day:'numeric'});
-  const notes = [...v.flags.map(t => ['alert', 'bad', t]), ...v.pros.map(t => ['check', 'good', t]), ...v.cons.map(t => ['alert', 'bad', t])];
   $('#cmpOut').innerHTML = `<div class="cmp-verdict v-${v.level}"><span class="v-ic">${ic(v.level === 'good' ? 'check' : 'alert')}</span><div><p class="v-k">${r.purpose === 'trip' ? 'Trip' : 'Move'} · ${dd(win.start)} to ${dd(win.end)}</p><h2>${esc(v.head)}</h2><p>${esc(a.loc.short)} scores ${sa.total} and ${esc(b.loc.short)} scores ${sb.total} out of 100.</p></div></div>
     <div class="cmp-cards">${sc(a, sa, 'From')}${sc(b, sb, 'To')}</div>
     <section class="card cmp-sec"><header class="cmp-sec-h"><h2>Side by side</h2></header><p class="cmp-idea">Both places on the same scale for your dates. A check mark shows the clearly better one.</p>
       <div class="tbl-scroll"><table class="tbl cmp-tbl"><thead><tr><th></th><th>${esc(a.loc.short)} <small>(from)</small></th><th>${esc(b.loc.short)} <small>(to)</small></th></tr></thead><tbody>${rows}</tbody></table></div>
-      ${notes.length || v.tips.length ? `<div class="cmp-notes2">${notes.length ? `<ul class="notes">${notes.map(([i2, c2, t]) => li([t], i2, c2)).join('')}</ul>` : ''}${v.tips.length ? `<div><h3>${ic('bulb')}Tips for ${esc(b.loc.short)}</h3><ul class="notes">${li(v.tips, 'bulb', '')}</ul></div>` : ''}</div>` : ''}
+      ${v.flags.length || v.tips.length || v.pros.length || v.cons.length ? `<div class="cmp-notes2">${v.flags.length ? callout(ic, 'warn', 'Watch out', v.flags.map(esc).join('<br>')) : ''}${v.pros.length || v.cons.length ? callout(ic, 'key', `Why ${esc(b.loc.short)} scores ${sb.total >= sa.total ? 'higher' : 'lower'}`, [...v.pros, ...v.cons].map(esc).join('<br>'), 'compare') : ''}${v.tips.length ? callout(ic, 'tip', `Tips for ${esc(b.loc.short)}`, `<ul>${v.tips.map(t => `<li>${esc(t)}</li>`).join('')}</ul>`) : ''}</div>` : ''}
       <p class="muted cmp-src">Climate: NASA POWER daily, 30 years for your dates. Air (PM2.5): NASA MERRA-2. Earthquakes: USGS, M4.5+ within 200 km, ${LAST_YEAR - 9}–${LAST_YEAR}.${a.fc?.length || b.fc?.length ? ' Weather forecast: Open-Meteo (not NASA).' : ''}</p></section>
     ${outlookHtml(a, b)}
     ${forecastSection(a, b)}
@@ -1172,6 +1191,7 @@ document.addEventListener('click', e => {
   else if(act === 'del'){ const l = findLoc(id); if(l){ toggleFav(l); renderProjects(); fillLocation(); if(world) world.labelsData(globeLabels()); toast(`${l.short || l.name} removed from Projects.`); } }
   else if(act === 'star'){ const l = findLoc(id); if(l){ if(!isFav(l)) toggleFav(l); renderProjects(); fillLocation(); toast(`${l.short || l.name} added to Projects.`); } }
   else if(act === 'go-home') goHome();
+  else if(act === 'new-scan') newScan();
   else if(act === 'clear'){ Object.keys(localStorage).filter(k => k.startsWith(CACHE_VER)).forEach(k => localStorage.removeItem(k)); toast('Cached scans cleared.'); }
   else if(act === 'csv'){ if(S.A) downloadCSV(S.A, S.loc); else toast('Scan a location first.'); }
   else if(act === 'report-quick'){ if(!S.A) return; saveReport(`${S.loc.short} climate and hazard study`, '', SECTIONS.map(s => s[0])).then(r => { if(r && !RP.list.some(x => x.id === r.id && x.createdAt < Date.now() - 2000)) toast('Report saved. Find it in Reports (kept for this visit).'); }); }

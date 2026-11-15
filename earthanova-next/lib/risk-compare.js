@@ -61,6 +61,12 @@ export function forecastSection(a, b){
     <div class="dv-key"><span><i style="background:${C_HI}"></i>Afternoon high</span><span><i style="background:${C_LO}"></i>Night low</span><span class="muted">band = normal range (8 days in 10, NASA POWER) · line = forecast</span></div>
     <p class="muted cmp-src">Forecast: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Weather data by Open-Meteo.com</a> (CC BY 4.0), from national weather services. Forecasts reach about 16 days ahead; later days use NASA data only.</p></section>`;
 }
+/* one sentence on what to expect at the destination, as a key-finding callout */
+function outlookKey(b){
+  const o = b.ol, wet = o.odds.wet ?? 0, rainTxt = wet < .05 ? 'rain is very unlikely' : wet < .2 ? `rain on about 1 day in ${Math.max(2, Math.round(1 / wet))}` : `rain on about ${Math.round(wet * 100)}% of days`;
+  const hot = o.odds.hot >= .1 ? ` About ${Math.round(o.odds.hot * 100)}% of days reach 35 °C.` : '', cold = o.odds.cold >= .1 ? ` Some nights drop to 5 °C or less.` : '';
+  return `<aside class="callout co-key"><span class="co-ic"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v2M12 19v2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M3 12h2M19 12h2M5.6 18.4 7 17M17 7l1.4-1.4M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/></svg></span><div class="co-b"><p class="co-k">In ${esc(b.loc.short)} on your dates</p><div class="co-t"><b>Expect afternoons around ${fmt(o.high.p50, 0)} °C and nights around ${fmt(o.low.p50, 0)} °C</b>, with ${rainTxt}.${hot}${cold}</div></div></aside>`;
+}
 export function outlookHtml(a, b){
   const rows = [{name:a.loc.short, role:'from', ol:a.ol}, {name:b.loc.short, role:'to', ol:b.ol}];
   const line = (label, f, better) => { const x = f(a.ol), y = f(b.ol), w = better ? better(a.ol, b.ol) : 0; return `<tr><th scope="row">${label}</th><td class="${w < 0 ? 'win' : ''}">${x}</td><td class="${w > 0 ? 'win' : ''}">${y}</td></tr>`; };
@@ -69,6 +75,7 @@ export function outlookHtml(a, b){
   return `<section class="card cmp-sec">
     <header class="cmp-sec-h"><h2>What to expect on your dates</h2><span class="tag cyan">NASA POWER daily, ${a.ol.years[0]}–${a.ol.years[1]}</span></header>
     <p class="cmp-idea">Nobody can forecast the exact weather weeks ahead. But 30 years of NASA data for the same days, moved to today's warmer climate, show what is likely.</p>
+    ${outlookKey(b)}
     <figure class="cmp-fig">${outlookChart(rows)}</figure>
     <div class="tbl-scroll"><table class="tbl cmp-tbl"><thead><tr><th></th><th>${esc(a.loc.short)} <small>(from)</small></th><th>${esc(b.loc.short)} <small>(to)</small></th></tr></thead><tbody>
       ${line('Chance of a hot day (35 °C or more)', o => pc(o.odds.hot), diffP('hot'))}
@@ -89,7 +96,27 @@ export function climFromOutlook(o){
     hotFrac:o.odds.hot, coldFrac:o.odds.frost, lenDays:o.window.days, rainTotal:o.rain.median_total ?? 0};
 }
 
+/* ===================== callouts =====================
+ * One look for the things a visitor should not miss: kind 'key' = key finding (orange, the evidence colour),
+ * 'tip' = what you can do (cyan), 'warn' = watch out (red), 'ok' = all clear (green). */
+export const callout = (ic, kind, label, body, icon) =>
+  `<aside class="callout co-${kind}"><span class="co-ic">${ic(icon || {key:'search', tip:'bulb', warn:'alert', ok:'check'}[kind])}</span><div class="co-b"><p class="co-k">${esc(label)}</p><div class="co-t">${body}</div></div></aside>`;
+
 /* ===================== RISK MONITORING ===================== */
+/* practical advice per hazard, shown as a "What you can do" callout */
+export const HZ_TIPS = {
+  quake:{hi:'Learn "drop, cover, hold on", know the safe spot in each room (under a sturdy table), fix heavy furniture to the wall and keep a small emergency bag ready.', lo:'Strong earthquakes are rare here, but knowing "drop, cover, hold on" is always worth it.'},
+  heat:{hi:'Drink water often, avoid hard outdoor work between 11:00 and 16:00, keep rooms shaded, and check on older people and children during heat waves.', lo:'Heat is not a big threat here. On hot days still carry water and take breaks in the shade.'},
+  drought:{hi:'Save water at home, water plants early in the morning or late in the evening, and follow local water-use advice.', lo:'No sign of a drying trend. Using water carefully still helps in dry seasons.'},
+  flood:{hi:'Never walk or drive through flood water, keep street drains clear, and know the way to higher ground from home and school.', lo:'No strong flood signal. During heavy storms, still avoid low roads and underpasses.'},
+  dust:{hi:'On dusty or polluted days, limit hard exercise outdoors and keep windows closed. People with asthma should keep their medicine at hand; a well-fitting N95 mask helps.', lo:'The air is mostly clean. Sensitive people may still notice the occasional dusty day.'},
+  sea:{hi:'Low coastal areas will flood more often during storms. Check local flood maps before building or buying near the shore.', lo:'The sea is rising slowly here. It matters most for very low land right on the coast.'}
+};
+export function topConcern(HAZARDS, H, levels){
+  const ranked = HAZARDS.map((h, i) => ({h, i, r:H[h.id], lv:levels[i]})).filter(x => x.lv !== 'na' && x.lv !== 'scanning').sort((a, b) => b.r.score - a.r.score);
+  return ranked[0] || null;
+}
+
 /* the question each tower answers, in plain words */
 export const HZ_Q = {
   quake:'How often does the ground shake nearby?',

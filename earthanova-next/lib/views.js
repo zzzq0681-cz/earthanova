@@ -5,6 +5,7 @@
 import {VARS, varById, SEASONS, seasonLabel, series, clip, availableVars, verdict, trendTest, ols, pearson, detrend, mean,
   spark, trendChart, anomalyChart, stripes, heatmap, cycleChart, decadeChart, scatter, zChart, corrMatrix, baselineOf,
   fmt, sgn, pTxt, MON, MON_LONG, wireTips} from './detective.js';
+import {callout} from './risk-compare.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
@@ -44,8 +45,8 @@ function summaryHtml(A, I, loc){
   pts.push(['wind', !A.aq ? 'Air-quality data is not loaded for this place yet.' : A.aq.pm25 <= 15 ? `The air has few fine particles (${A.aq.pm25} µg/m³ yearly average).` : A.aq.pm25 <= 35 ? `The air has a moderate level of fine particles (${A.aq.pm25} µg/m³). Sensitive people may notice on dusty days.` : `The air carries a lot of fine particles (${A.aq.pm25} µg/m³). Limit long outdoor exercise on bad days.`]);
   const sol = A.cur.solar ?? A.base.solar;
   if(sol != null) pts.push(['sun', sol >= 5 ? `Very sunny: ${sol.toFixed(1)} kWh of sunlight per square metre a day, great for solar power.` : sol >= 4 ? `A fair amount of sun for solar power (${sol.toFixed(1)} kWh/m² a day).` : `Sunshine is on the low side for solar power (${sol.toFixed(1)} kWh/m² a day).`]);
-  const watch = I.hazardFlags.length ? `Worth a look in Risk Monitoring: ${I.hazardFlags.slice(0, 2).map(f => f.t.toLowerCase()).join('; ')}.` : 'No natural-hazard warning signs in the screening.';
-  return `<p class="sum-head">${esc(head)}</p><ul class="sum-list">${pts.map(([i, t]) => `<li><span class="sum-ic">${C.ic(i)}</span><span>${esc(t)}</span></li>`).join('')}</ul><p class="sum-watch ${I.hazardFlags.length ? 'warn' : 'ok'}">${C.ic(I.hazardFlags.length ? 'alert' : 'check')}<span>${esc(watch)}</span></p>`;
+  const watch = I.hazardFlags.length ? `${I.hazardFlags.slice(0, 2).map(f => f.t).join('. ')}. Open Risk Monitoring for details.` : 'No natural-hazard warning signs in the screening.';
+  return `<p class="sum-head">${esc(head)}</p><ul class="sum-list">${pts.map(([i, t]) => `<li><span class="sum-ic">${C.ic(i)}</span><span>${esc(t)}</span></li>`).join('')}</ul>${callout(C.ic, I.hazardFlags.length ? 'warn' : 'ok', I.hazardFlags.length ? 'Watch out' : 'All clear', esc(watch))}`;
 }
 const TOOLKIT = [
   ['Variable', 'One thing that is measured, such as temperature or rainfall. Each card on the case board is one variable.'],
@@ -63,11 +64,20 @@ function toolkitHtml(){
     <dl class="tk-list">${TOOLKIT.map(([t, d]) => `<div><dt>${esc(t)}</dt><dd>${esc(d)}</dd></div>`).join('')}</dl>
     <p class="tk-steps"><b>How to investigate:</b> pick a variable, look at its line, read the verdict, then switch to Advanced to test a season, a shorter period or a link between two variables.</p>`;
 }
+/* the single most striking result on the case board, shown as a key-finding callout */
+function keyFinding(A, loc){
+  const vs = availableVars(A, false).map(v => { const sr = series(A, v.id), vd = sr && verdict(sr); return vd && {v, sr, vd, rel:Math.abs(vd.t.z)}; }).filter(Boolean);
+  const real = vs.filter(x => x.vd.level === 'real').sort((a, b) => b.rel - a.rel);
+  if(!real.length) return callout(C.ic, 'key', 'Key finding', `<b>No variable shows a real long-term trend at ${esc(loc.short)}.</b> The ups and downs here look like normal year-to-year variation. That is a finding too.`);
+  const x = real[0], others = real.slice(1).map(y => y.v.short);
+  return callout(C.ic, 'key', 'Key finding', `<b>${esc(x.v.name)} ${x.vd.t.slope > 0 ? 'rose' : 'fell'} by ${esc(changeText(x.v, x.vd))} since ${x.sr.years[0]}</b>, and the trend test says this is not chance (p ${pTxt(x.vd.t.p)}).${others.length ? ` Also changing for real: ${esc(others.join(', '))}.` : ''}`);
+}
 export function renderBasic(A, I, loc){
   $('#sumBody').innerHTML = summaryHtml(A, I, loc);
   const vars = availableVars(A, false), yr = yearsOf(A);
   $('#caseLead').textContent = `Every card is one variable NASA measures at ${loc.short}${yr ? `, ${yr[0]} to ${yr[1]}` : ''}. Read what it means, look at its line, then check the verdict: a real trend, or could it be chance?`;
   $('#caseGrid').innerHTML = vars.map(v => clueCard(A, v)).join('') || '<div class="empty">No long NASA record is loaded for this place.</div>';
+  $('#caseKey').innerHTML = keyFinding(A, loc);
   $('#toolkit').innerHTML = toolkitHtml();
 }
 
@@ -88,7 +98,7 @@ function statsBlock(sr){
     ["Mann-Kendall τ", fmt(t.tau, 3)], ['Mann-Kendall z', fmt(t.z, 2)], ['p-value (two-sided)', pTxt(t.p)],
     ['Least-squares slope', f ? `${sgn(f.slope * 10, d)} ± ${fmt(f.ci * 10, d)} / decade` : '—'], ['R²', f ? fmt(f.r2, 3) : '—'], ['Least-squares p', f ? pTxt(f.p) : '—']];
   const read = vd.level === 'real' ? `A monotonic ${t.slope > 0 ? 'increase' : 'decrease'} is significant at the 5% level (Mann-Kendall p ${pTxt(t.p)}), and the 95% range of Sen's slope excludes zero${t.lo * t.hi > 0 ? '' : ' only narrowly'}.` : vd.level === 'maybe' ? `Weak evidence (p ${pTxt(t.p)}): the direction is suggestive but not significant at 5%. A longer record or a different season may settle it.` : `No significant monotonic trend (p ${pTxt(t.p)}). Year-to-year variability dominates over this period.`;
-  return `<dl class="xp-stats">${rows.map(([k, x]) => `<div><dt>${esc(k)}</dt><dd>${esc(x)}</dd></div>`).join('')}</dl><p class="xp-read ${LV_CLASS[vd.level]}"><b>${esc(vd.word)}.</b> ${esc(read)}</p>`;
+  return `<dl class="xp-stats">${rows.map(([k, x]) => `<div><dt>${esc(k)}</dt><dd>${esc(x)}</dd></div>`).join('')}</dl>${callout(C.ic, vd.level === 'real' ? 'key' : 'info', 'What this means', `<b>${esc(vd.word)}.</b> ${esc(read)}`, vd.level === 'real' ? 'search' : 'info')}`;
 }
 function explorerHtml(A){
   const vars = availableVars(A), v = varById(EX.v) && vars.some(x => x.id === EX.v) ? varById(EX.v) : vars[0];
@@ -124,7 +134,7 @@ function vsHtml(A){
   const trap = !VS.detr && raw && Math.abs(raw.r) > .4 ? ` Both variables may simply share a trend over time. Press <b>With trends removed</b> to check whether the link survives (it is then ${'r = ' + fmt(pearson(detrend(yrs, a0), detrend(yrs, b0))?.r, 2)}).` : VS.detr ? ' Trends were removed from both, so this compares the year-to-year ups and downs only.' : '';
   return ctl + `<div class="vs-grid"><figure>${scatter(a, b, yrs.map(String), vx, vy, f, {anom:VS.detr})}<figcaption>One dot per year. Orange: least-squares line (dashed when not significant).</figcaption></figure>
     <figure>${zChart(yrs, a0, b0, vx, vy)}<figcaption>Both variables on one scale (standard deviations from their own average), so you can see whether they rise and fall together.</figcaption></figure></div>
-    <p class="xp-read ${r.p < 0.05 ? 'lv-real' : 'lv-none'}">${read}${trap} <span class="muted">Correlation is a clue, not proof that one causes the other.</span></p>`;
+    ${callout(C.ic, r.p < 0.05 ? 'key' : 'info', 'What this means', `${read}${trap} <span class="muted">Correlation is a clue, not proof that one causes the other.</span>`, r.p < 0.05 ? 'search' : 'info')}`;
 }
 function matrixHtml(A){
   const vars = availableVars(A).filter(v => v.id !== 'rainSat'); if(vars.length < 3) return '<div class="empty">Not enough variables.</div>';
@@ -256,7 +266,7 @@ function answerCase(ok, btn, extra = ''){
   $$('#quizBody [data-pl="pick"]').forEach(b => { b.disabled = true; if(b.dataset.k === String(q.a)) b.classList.add('right'); else if(b === btn) b.classList.add('wrong'); });
   $$('#quizBody [data-pl="slide"], #caseRange').forEach(b => b.disabled = true);
   $('#quizFb').innerHTML = `<p class="${ok ? 'ok' : 'no'}">${C.ic(ok ? 'check' : 'alert')}<span><b>${ok ? 'Solved.' : 'Not this time.'}</b> ${extra}${esc(q.why)}</span></p>
-    <figure class="case-ev"><figcaption>The evidence</figcaption>${q.ev()}</figure><p class="case-tip">${C.ic('book')}<span>${esc(q.tip)}</span></p>
+    <figure class="case-ev"><figcaption>The evidence</figcaption>${q.ev()}</figure>${callout(C.ic, 'tip', 'Detective tip', esc(q.tip), 'book')}
     <button class="btn-primary" data-pl="next">${QZ.i + 1 >= QZ.qs.length ? 'Close the case' : 'Next clue'}</button>`;
 }
 function renderForecastGame(A, loc){

@@ -1259,3 +1259,37 @@ body:is([data-page="plans"],[data-page="profile"],[data-page="tracking"],[data-p
 .fc-block .dv-svg{max-width:780px}
 .cmp-src a{color:var(--cyan)}
 .fc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:18px}
+
+/* ================= callouts: key finding / tip / watch out ================= */
+.callout{display:grid;grid-template-columns:40px minmax(0,1fr);gap:12px;align-items:start;padding:14px 16px;border-radius:14px;border:1px solid var(--co-b);border-left:4px solid var(--co);background:linear-gradient(100deg,var(--co-bg),rgba(6,17,31,.35) 70%);margin:2px 0}
+.callout .co-ic{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;color:var(--co);background:var(--co-bg);box-shadow:inset 0 0 0 1px var(--co-b)}
+.callout .co-ic svg.ic{width:21px;height:21px;stroke-width:2.1}
+.callout .co-k{margin:0 0 3px!important;font:700 13.5px var(--f-head)!important;color:var(--co)!important;letter-spacing:.01em}
+.callout .co-t{font-size:15px;line-height:1.5;color:var(--ink)}
+.callout .co-t b{color:#fff}
+.callout .co-t ul{margin:2px 0 0;padding-left:18px}
+.callout .co-t li{margin:2px 0}
+.callout .co-t .muted{font-size:13px}
+.co-key{--co:var(--evi);--co-bg:rgba(255,180,107,.12);--co-b:rgba(255,180,107,.38);box-shadow:0 0 0 1px rgba(255,180,107,.06),0 10px 30px -12px rgba(255,180,107,.35)}
+.co-tip{--co:#4FD1E8;--co-bg:rgba(79,209,232,.11);--co-b:rgba(79,209,232,.36)}
+.co-warn{--co:#FF7A8A;--co-bg:rgba(255,97,120,.12);--co-b:rgba(255,97,120,.4)}
+.co-ok{--co:var(--mint);--co-bg:rgba(54,226,177,.1);--co-b:rgba(54,226,177,.35)}
+.co-info{--co:var(--ink-2);--co-bg:rgba(145,174,194,.08);--co-b:rgba(145,174,194,.28)}
+#caseKey .callout{margin:0 0 14px}
+#riskTop .callout{margin:0 0 10px}
+.risk-detail>.callout{margin:0}
+.xp-side .callout{margin-top:6px}
+.xp-side .callout .co-t{font-size:13.5px}
+.cmp-notes2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.case-ev+.callout{margin-bottom:12px}
+@media (max-width:640px){.callout{grid-template-columns:34px minmax(0,1fr);gap:10px;padding:12px}.callout .co-ic{width:34px;height:34px}.callout .co-t{font-size:14px}}
+
+/* "Scan another place": the way back to the globe */
+.btn-newscan{display:inline-flex;align-items:center;gap:9px;height:42px;padding:0 16px 0 12px;border-radius:12px;border:1.5px solid rgba(79,209,232,.7);background:rgba(79,209,232,.12);color:#E9FBFF;font:700 14px var(--f-head);white-space:nowrap;box-shadow:0 0 22px -6px rgba(79,209,232,.6)}
+.btn-newscan svg.ic{width:20px;height:20px;color:var(--cyan)}
+.btn-newscan:hover{background:rgba(79,209,232,.22);border-color:var(--cyan)}
+.btn-newscan:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.dash-head .btn-newscan{margin-right:auto}
+@media (max-width:1100px){.dash-head .btn-newscan{width:100%;justify-content:center;margin:0}}
+#globe.is-locked{cursor:default}
+#globe.is-locked canvas{cursor:default!important}

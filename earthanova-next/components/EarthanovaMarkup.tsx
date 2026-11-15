@@ -222,6 +222,7 @@ export default function EarthanovaMarkup() {
                   <h1 id="dhTitle">Alexandria, Egypt</h1>
                   <p id="dhSub">—</p>
                 </div>
+                <button className="btn-newscan" data-act="new-scan"><i data-ic="globe" />Scan another place</button>
                 <div className="scan-ctl" id="scanCtl">
                   <label className="sr-only" htmlFor="dStart">From</label>
                   <select id="dStart" />
@@ -259,6 +260,7 @@ export default function EarthanovaMarkup() {
                     <h2 id="caseH"><i data-ic="search" />Case board: what is changing here?</h2>
                   </header>
                   <p className="card-lead" id="caseLead" />
+                  <div id="caseKey" />
                   <div className="case-grid" id="caseGrid" />
                 </article>
                 <article className="card toolkit" data-views="basic" aria-labelledby="tkH">
@@ -409,6 +411,7 @@ export default function EarthanovaMarkup() {
                   <p id="riskSub">Six towers, one per natural hazard, all aimed at your scanned place.</p>
                 </div>
                 <div className="ph-actions">
+                  <button className="btn-newscan" data-act="new-scan"><i data-ic="globe" />Scan another place</button>
                   <button className="btn-ghost" id="riskRescan"><i data-ic="refresh" />Rescan towers</button>
                 </div>
               </header>
@@ -428,6 +431,7 @@ export default function EarthanovaMarkup() {
                       <div className="counts" id="riskCounts" />
                     </header>
                     <p className="card-lead">Each tower checks one natural hazard. A longer bar means a higher risk score; the arrow marks a worsening trend. Pick one to see why.</p>
+                    <div id="riskTop" />
                     <ul className="glance" id="towerList" />
                   </aside>
                 </div>
