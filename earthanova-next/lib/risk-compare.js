@@ -26,6 +26,41 @@ export function outlookChart(rows){
   return `<svg class="dv-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Night lows and afternoon highs to expect on your dates">${g}</svg>
     <div class="dv-key"><span><i style="background:${C_LO}"></i>Night low</span><span><i style="background:${C_HI}"></i>Afternoon high</span><span class="muted">bar = 8 days in 10 · white tick = typical day</span></div>`;
 }
+/* Open-Meteo weather forecast (not NASA) for the days of the trip that fall in the next 16 days,
+ * drawn on top of the NASA "normal" range for each day, so you see if this year looks warmer or cooler than usual. */
+export function forecastVsNormal(name, ol, fc){
+  const byD = Object.fromEntries((ol.daily || []).map(r => [r.d, r]));
+  const days = fc.filter(f => byD[f.d]).slice(0, 16); if(!days.length) return '';
+  const W = phone() ? 380 : 720, H = phone() ? 230 : 250, L = 40, R = 14, T = 18, B = 30, n = days.length;
+  const vals = days.flatMap(f => [f.hi, f.lo, ...byD[f.d].hi, ...byD[f.d].lo]).filter(v => v != null);
+  const lo = Math.floor(Math.min(...vals) / 5) * 5, hi = Math.ceil(Math.max(...vals) / 5) * 5, slot = (W - L - R) / n;
+  const X = i => L + (i + .5) * slot, Y = v => T + (hi - v) / (hi - lo) * (H - T - B);
+  let g = '';
+  for(let v = lo; v <= hi; v += 5) g += `<line class="dv-grid" x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}"/><text class="dv-ax" x="${L - 6}" y="${Y(v) + 4}" text-anchor="end">${v}°</text>`;
+  const band = (k, col) => { const top = days.map((f, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)} ${Y(byD[f.d][k][2]).toFixed(1)}`).join(''), bot = days.slice().reverse().map((f, j) => `L${X(n - 1 - j).toFixed(1)} ${Y(byD[f.d][k][0]).toFixed(1)}`).join('');
+    return n > 1 ? `<path d="${top}${bot}Z" fill="${col}" fill-opacity=".22"/>` : `<rect x="${X(0) - 10}" y="${Y(byD[days[0].d][k][2])}" width="20" height="${Y(byD[days[0].d][k][0]) - Y(byD[days[0].d][k][2])}" fill="${col}" fill-opacity=".22"/>`; };
+  g += band('hi', C_HI) + band('lo', C_LO);
+  const line = (k, col) => n > 1 ? `<path d="${days.map((f, i) => f[k] == null ? '' : `${i ? 'L' : 'M'}${X(i).toFixed(1)} ${Y(f[k]).toFixed(1)}`).join('')}" fill="none" stroke="${col}" stroke-width="2.2"/>` : '';
+  g += line('hi', C_HI) + line('lo', C_LO);
+  const every = Math.max(1, Math.ceil(n / (phone() ? 5 : 8)));
+  days.forEach((f, i) => { const nr = byD[f.d], dl = new Date(f.d + 'T12:00:00').toLocaleDateString(undefined, {month:'short', day:'numeric'});
+    [['hi', C_HI], ['lo', C_LO]].forEach(([k, col]) => { if(f[k] != null) g += `<circle cx="${X(i).toFixed(1)}" cy="${Y(f[k]).toFixed(1)}" r="4" fill="${col}" stroke="#06111F" stroke-width="1.5"/>`; });
+    if(i % every === 0) g += `<text class="dv-ax" x="${X(i)}" y="${H - 10}" text-anchor="middle">${dl}</text>`;
+    g += `<rect class="dv-hit" x="${(X(i) - slot / 2).toFixed(1)}" y="${T}" width="${slot.toFixed(1)}" height="${H - T - B}" ${tip(`${name}, ${dl}`, [['forecast high / low', `${fmt(f.hi, 0)} / ${fmt(f.lo, 0)} °C`], ['normal high (NASA)', `${fmt(nr.hi[0], 0)} to ${fmt(nr.hi[2], 0)} °C`], ['normal low (NASA)', `${fmt(nr.lo[0], 0)} to ${fmt(nr.lo[2], 0)} °C`], ...(f.pop != null ? [['chance of rain', `${f.pop}%`]] : [])])}/>`; });
+  const dHi = mean(days.map(f => f.hi - byD[f.d].hi[1])), word = Math.abs(dHi) < 1 ? 'about normal' : dHi > 0 ? `${fmt(dHi, 1)} °C warmer than normal` : `${fmt(-dHi, 1)} °C cooler than normal`;
+  const wet = days.filter(f => (f.pop ?? 0) >= 50).length;
+  return `<div class="fc-block"><p class="fc-sum"><b>${esc(name)}:</b> forecast afternoons are ${word} for ${n === 1 ? 'this day' : `these ${n} days`}${wet ? `, with rain likely on ${wet} day${wet > 1 ? 's' : ''}` : ''}.</p>
+    <svg class="dv-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(name)}: weather forecast compared with the normal range">${g}</svg></div>`;
+}
+export function forecastSection(a, b){
+  const parts = [a, b].filter(d => d.fc?.length).map(d => forecastVsNormal(d.loc.short, d.ol, d.fc)).filter(Boolean);
+  if(!parts.length) return '';
+  return `<section class="card cmp-sec"><header class="cmp-sec-h"><h2>Weather forecast for your first days</h2><span class="tag amber">Not NASA: Open-Meteo forecast</span></header>
+    <p class="cmp-idea">Your trip starts soon, so a real weather forecast exists. Dots and lines are the forecast; the shaded bands are what is normal for each day from NASA data. Above the band means warmer than usual.</p>
+    <div class="fc-grid">${parts.join('')}</div>
+    <div class="dv-key"><span><i style="background:${C_HI}"></i>Afternoon high</span><span><i style="background:${C_LO}"></i>Night low</span><span class="muted">band = normal range (8 days in 10, NASA POWER) · line = forecast</span></div>
+    <p class="muted cmp-src">Forecast: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Weather data by Open-Meteo.com</a> (CC BY 4.0), from national weather services. Forecasts reach about 16 days ahead; later days use NASA data only.</p></section>`;
+}
 export function outlookHtml(a, b){
   const rows = [{name:a.loc.short, role:'from', ol:a.ol}, {name:b.loc.short, role:'to', ol:b.ol}];
   const line = (label, f, better) => { const x = f(a.ol), y = f(b.ol), w = better ? better(a.ol, b.ol) : 0; return `<tr><th scope="row">${label}</th><td class="${w < 0 ? 'win' : ''}">${x}</td><td class="${w > 0 ? 'win' : ''}">${y}</td></tr>`; };

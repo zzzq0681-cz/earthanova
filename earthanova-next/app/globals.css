@@ -1254,3 +1254,8 @@ body:is([data-page="plans"],[data-page="profile"],[data-page="tracking"],[data-p
 .cmp-fig .dv-svg{max-width:780px}
 #cmpPlan .pl-sec{display:grid;gap:10px}
 .rd-sum .stamp{display:inline-block}
+.fc-block{display:grid;gap:4px;margin-top:4px}
+.fc-sum{margin:0!important;font-size:14px!important;color:var(--ink)!important}
+.fc-block .dv-svg{max-width:780px}
+.cmp-src a{color:var(--cyan)}
+.fc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:18px}

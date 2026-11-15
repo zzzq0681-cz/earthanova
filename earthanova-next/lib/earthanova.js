@@ -4,7 +4,7 @@
 import Globe from 'globe.gl';
 import {towerViz, renderChart as renderHzChart, wireCharts as wireHzCharts} from './hazard-charts.js';
 import {buildPlan, bestTimeHtml, wirePlanner} from './compare-planner.js';
-import {outlookHtml, climFromOutlook, HZ_Q, hazardTrend, glanceHtml, calendarHtml, eventsMapHtml} from './risk-compare.js';
+import {outlookHtml, forecastSection, climFromOutlook, HZ_Q, hazardTrend, glanceHtml, calendarHtml, eventsMapHtml} from './risk-compare.js';
 import {initViews, renderBasic, renderAdvanced as renderAdvViews, renderPlayful as renderPlayViews} from './views.js';
 import {VARS, series as dvSeries, verdict as dvVerdict, fmt as dvFmt, sgn as dvSgn, pTxt} from './detective.js';
 import {eonetEvents, nasaHazards, nasaOutlook, nasaClimateYear, apiBase, nasaFind, nasaEnsure, nasaLoad, nasaBuildAnalysis, isStatic, reportUrl} from './nasa-data.js';
@@ -1015,7 +1015,7 @@ const CMP = {from:null, to:null, start:null, end:null, pref:'mild', purpose:'tri
 const PREF = {mild:[18, 26, 'mild (18–26 °C)'], warm:[24, 32, 'warm (24–32 °C)'], cool:[8, 18, 'cool (8–18 °C)']};
 const isoDay = d => d.toISOString().slice(0, 10);
 function renderCompare(){
-  if(!CMP.start){ const a = new Date(Date.now() + 14*864e5), b = new Date(Date.now() + 21*864e5); CMP.start = isoDay(a); CMP.end = isoDay(b); }
+  if(!CMP.start){ const a = new Date(Date.now() + 5*864e5), b = new Date(Date.now() + 12*864e5); CMP.start = isoDay(a); CMP.end = isoDay(b); }
   if(!CMP.from && S.A) CMP.from = S.A.loc;
   const chipsFor = key => knownPlaces().slice(0, 6).map(p => `<button type="button" class="chip-opt" data-cmp-pick="${key}" data-id="${esc(p.id)}">${esc(p.short)}</button>`).join('');
   $('#pageCompare').innerHTML = `<div class="page-in"><header class="page-h"><div><h1>${ic('compare')}Compare places</h1><p>Is your destination a good choice for your dates? Pick two places and the dates. We compare them with NASA data and give one clear answer.</p></div></header>
@@ -1041,17 +1041,22 @@ const mdNum = d => (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
 async function placeData(l, win){
   const q = `latitude=${l.lat}&longitude=${l.lon}`;
   const hzP = nasaEnsure(l.lat, l.lon, l.short || l.name).then(hit => nasaHazards(hit.place.name));   // slow the first time for a new place
-  const [olR, eq, hz] = await Promise.allSettled([
+  const today = isoDay(new Date()), far = isoDay(new Date(Date.now() + 15*864e5)), near = win.start <= far && win.end >= today;
+  const [olR, eq, hz, fcR] = await Promise.allSettled([
     nasaOutlook(l.lat, l.lon, win.start, win.end),
     getJSON(`https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&${q}&maxradiuskm=200&starttime=${LAST_YEAR - 9}-01-01&minmagnitude=4.5&orderby=magnitude&limit=500`, 15000),
-    hzP
+    hzP,
+    /* Open-Meteo weather forecast (not NASA), only for trip days within the next 16 days */
+    near ? getJSON(`https://api.open-meteo.com/v1/forecast?${q}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max&forecast_days=16&timezone=auto`, 15000) : Promise.resolve(null)
   ]);
   if(olR.status !== 'fulfilled') throw new Error(`NASA climate history for ${l.short} could not be loaded${olR.reason?.message ? ` (${olR.reason.message})` : ''}.`);
   const ol = olR.value, clim = climFromOutlook(ol);
   const f = eq.status === 'fulfilled' ? eq.value.features || [] : null;
   const quakes = f ? {perYear:f.length / 10, count:f.length, max:f.length ? Math.max(...f.map(q => q.properties.mag)) : null} : null;
   const dustA = hz.status === 'fulfilled' ? hz.value.dust?.annual : null, airA = hz.status === 'fulfilled' ? hz.value.air?.annual : null;
-  return {loc:l, ol, clim, quakes, dust:dustA?.length ? mean(dustA.slice(-5)) : null, pm:airA?.length >= 5 ? mean(airA.slice(-5)) : null, elev:null};
+  const fd = fcR.status === 'fulfilled' ? fcR.value?.daily : null;
+  const fc = fd ? fd.time.map((d, i) => ({d, hi:fd.temperature_2m_max[i], lo:fd.temperature_2m_min[i], rain:fd.precipitation_sum?.[i], pop:fd.precipitation_probability_max?.[i]})).filter(f => f.d >= win.start && f.d <= win.end && f.hi != null) : null;
+  return {loc:l, ol, clim, quakes, fc, dust:dustA?.length ? mean(dustA.slice(-5)) : null, pm:airA?.length >= 5 ? mean(airA.slice(-5)) : null, elev:null};
 }
 function scorePlace(d, pref, purpose){
   const c = d.clim, [lo, hi] = PREF[pref], dist = c.meanT < lo ? lo - c.meanT : c.meanT > hi ? c.meanT - hi : 0;
@@ -1123,8 +1128,9 @@ function showCompare(r){
     <section class="card cmp-sec"><header class="cmp-sec-h"><h2>Side by side</h2></header><p class="cmp-idea">Both places on the same scale for your dates. A check mark shows the clearly better one.</p>
       <div class="tbl-scroll"><table class="tbl cmp-tbl"><thead><tr><th></th><th>${esc(a.loc.short)} <small>(from)</small></th><th>${esc(b.loc.short)} <small>(to)</small></th></tr></thead><tbody>${rows}</tbody></table></div>
       ${notes.length || v.tips.length ? `<div class="cmp-notes2">${notes.length ? `<ul class="notes">${notes.map(([i2, c2, t]) => li([t], i2, c2)).join('')}</ul>` : ''}${v.tips.length ? `<div><h3>${ic('bulb')}Tips for ${esc(b.loc.short)}</h3><ul class="notes">${li(v.tips, 'bulb', '')}</ul></div>` : ''}</div>` : ''}
-      <p class="muted cmp-src">Climate: NASA POWER daily, 30 years for your dates. Air (PM2.5): NASA MERRA-2. Earthquakes: USGS, M4.5+ within 200 km, ${LAST_YEAR - 9}–${LAST_YEAR}.</p></section>
+      <p class="muted cmp-src">Climate: NASA POWER daily, 30 years for your dates. Air (PM2.5): NASA MERRA-2. Earthquakes: USGS, M4.5+ within 200 km, ${LAST_YEAR - 9}–${LAST_YEAR}.${a.fc?.length || b.fc?.length ? ' Weather forecast: Open-Meteo (not NASA).' : ''}</p></section>
     ${outlookHtml(a, b)}
+    ${forecastSection(a, b)}
     <div id="cmpPlan"></div>
     <div class="btn-row"><button class="btn-primary" data-act="cmp-open">${ic('scan')}Open ${esc(b.loc.short)} dashboard</button></div>
     <p class="muted foot">General guidance from open NASA climate data, not a safety guarantee. Check official travel advice before you decide.</p>`;
