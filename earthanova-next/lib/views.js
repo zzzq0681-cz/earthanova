@@ -226,9 +226,15 @@ function buildCases(A, loc){
   const pool = ['rain', 'sun', 'soil', 'tmax'].map(id => series(A, id)).filter(Boolean).map(sr => [sr, verdict(sr)]).filter(x => x[1]);
   const tq = pool.find(x => x[1].level === 'real') || pool[0];
   if(tq){ const [sr, vd] = tq, a = vd.level === 'real' ? (vd.t.slope > 0 ? 'up' : 'down') : 'none';
-    Q.push({kind:'choice', badge:'trend', pre:spark(sr, null), t:`Here is ${sr.v.name.toLowerCase()} in ${n}, one dot per year. Is there a real trend, or is it just ups and downs?`,
+    const m0 = mean(sr.values), dev = sr.values.map(x => Math.abs(x - m0)), odd = sr.years[dev.indexOf(Math.max(...dev))], y0 = sr.years[0], y1 = sr.years[sr.years.length - 1];
+    const first = mean(sr.values.slice(0, 10)), last = mean(sr.values.slice(-10)), dd = sr.v.unit === '°C' ? 1 : sr.v.dec;
+    const size = `${sr.v.name} moved ${sgn(vd.change, dd)} ${sr.v.unit} on the trend line from ${y0} to ${y1} (first 10 years averaged ${fmt(first, dd)}, last 10 years ${fmt(last, dd)} ${sr.v.unit}).`;
+    Q.push({kind:'choice', badge:'trend', pre:`<figure class="clue-fig">${spark(sr, null)}<figcaption><span>${y0}</span><span>${y1}</span></figcaption></figure>`,
+      t:`Here is ${sr.v.name.toLowerCase()} in ${n}, one dot per year. Is there a real trend, or is it just ups and downs?`,
+      hint:'Look past single jumps: do the left end and the right end of the line sit at different levels?',
       o:[['up', 'Real rise'], ['down', 'Real fall'], ['none', 'No clear trend']], a,
-      why:`The trend test gives p ${pTxt(vd.t.p)}. ${vd.t.p < 0.05 ? 'That is below 0.05, so a pattern this steady would rarely appear by chance.' : 'That is above 0.05, so the pattern could easily be chance.'}`,
+      why:a === 'none' ? `${size} The trend test gives p ${pTxt(vd.t.p)}, above 0.05: a change this small could easily be chance.`
+        : `${size} Single years jump up and down (look at ${odd}), but the overall direction is ${a === 'up' ? 'up' : 'down'}. The trend test gives p ${pTxt(vd.t.p)}: if nothing were really changing, a pattern this steady would appear by chance ${vd.chance} times.`,
       ev:() => trendChart(sr), tip:'Scientists call a trend significant when the chance of it appearing by luck is below 1 in 20.'}); }
   const sr = series(A, 'rain');
   if(sr && sr.years.length > 20){ const yrs = sr.years, i = Math.floor(yrs.length * .15), j = Math.floor(yrs.length * .8), [y1, y2] = [yrs[i + seed % 5], yrs[j - seed % 4]], v1 = sr.values[yrs.indexOf(y1)], v2 = sr.values[yrs.indexOf(y2)];
@@ -259,13 +265,14 @@ function renderCase(){
   const opts = q.kind === 'pick' ? `<div class="pick-opts">${q.o.map(([k, l, svg]) => `<button class="pick-opt" data-pl="pick" data-k="${k}"><span>${l}</span>${svg}</button>`).join('')}</div>`
     : q.kind === 'slider' ? `<div class="guess-row"><input id="caseRange" type="range" min="${q.min}" max="${q.max}" step="${q.step}" value="1" aria-label="Your guess in °C"><output id="caseOut" class="guess-out">+1.0 °C</output></div><button class="btn-primary" data-pl="slide">${C.ic('bolt')}Lock in my guess</button>`
     : `<div class="quiz-opts">${q.o.map(([k, l]) => `<button class="quiz-opt" data-pl="pick" data-k="${esc(k)}">${esc(l)}</button>`).join('')}</div>`;
-  body.innerHTML = `<p class="case-n">Clue ${QZ.i + 1}</p><p class="quiz-q">${esc(q.t)}</p>${q.pre ? `<div class="case-pre">${q.pre}</div>` : ''}${opts}<div class="quiz-fb" id="quizFb" aria-live="polite"></div>`;
+  body.innerHTML = `<p class="case-n">Clue ${QZ.i + 1}</p><p class="quiz-q">${esc(q.t)}</p>${q.hint ? `<p class="case-hint">${C.ic('bulb')}<span>${esc(q.hint)}</span></p>` : ''}${q.pre ? `<div class="case-pre">${q.pre}</div>` : ''}${opts}<div class="quiz-fb" id="quizFb" aria-live="polite"></div>`;
 }
 function answerCase(ok, btn, extra = ''){
   const q = QZ.qs[QZ.i]; QZ.locked = true; if(ok){ QZ.score++; award(20, `${QZ.key}:${QZ.i}`, q.badge); }
   $$('#quizBody [data-pl="pick"]').forEach(b => { b.disabled = true; if(b.dataset.k === String(q.a)) b.classList.add('right'); else if(b === btn) b.classList.add('wrong'); });
   $$('#quizBody [data-pl="slide"], #caseRange').forEach(b => b.disabled = true);
-  $('#quizFb').innerHTML = `<p class="${ok ? 'ok' : 'no'}">${C.ic(ok ? 'check' : 'alert')}<span><b>${ok ? 'Solved.' : 'Not this time.'}</b> ${extra}${esc(q.why)}</span></p>
+  const right = q.kind === 'slider' ? `${sgn(q.a, 1)} °C` : (q.o.find(o => String(o[0]) === String(q.a)) || [])[1];
+  $('#quizFb').innerHTML = `<p class="${ok ? 'ok' : 'no'}">${C.ic(ok ? 'check' : 'alert')}<span><b>${ok ? `Solved: ${esc(right)}.` : `Not this time. The answer is: ${esc(right)}.`}</b> ${extra}${esc(q.why)}</span></p>
     <figure class="case-ev"><figcaption>The evidence</figcaption>${q.ev()}</figure>${callout(C.ic, 'tip', 'Detective tip', esc(q.tip), 'book')}
     <button class="btn-primary" data-pl="next">${QZ.i + 1 >= QZ.qs.length ? 'Close the case' : 'Next clue'}</button>`;
 }

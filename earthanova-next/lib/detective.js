@@ -201,7 +201,7 @@ export function trendChart(sr, opt = {}){
   if(ma) g += `<path d="${ma.map((y, i) => y == null ? '' : `${ma[i - 1] == null ? 'M' : 'L'}${X(xs[i]).toFixed(1)} ${Y(y).toFixed(1)}`).join('')}" fill="none" stroke="#4FD1E8" stroke-width="2.2" stroke-linejoin="round"/>`;
   if(t){ const a = t.intercept + t.slope * xs[0], b = t.intercept + t.slope * xs[xs.length - 1];
     g += `<line x1="${X(xs[0])}" y1="${Y(a).toFixed(1)}" x2="${X(xs[xs.length - 1])}" y2="${Y(b).toFixed(1)}" stroke="#FFB46B" stroke-width="2.4" stroke-linecap="round"${t.p < 0.05 ? '' : ' stroke-dasharray="6 5"'}/>`;
-    if(!phone()) g += `<text class="dv-lbl" x="${X(xs[xs.length - 1]) + 8}" y="${Y(b) + 4}" fill="#FFB46B">trend ${sgn(t.slope * 10, d + 1)}</text><text class="dv-ax" x="${X(xs[xs.length - 1]) + 8}" y="${Y(b) + 18}">${esc(v.unit)} per decade</text>`;
+    if(!phone()) g += `<text class="dv-lbl" x="${X(xs[xs.length - 1]) + 8}" y="${Y(b) + 4}" fill="#FFB46B">trend ${sgn(t.slope * 10, d + 1)}</text><text class="dv-ax" x="${X(xs[xs.length - 1]) + 8}" y="${Y(b) + 18}">per decade</text>`;
   }
   if(ma && !phone()) g += `<text class="dv-lbl" x="${X(xs[xs.length - 1]) + 8}" y="${Y(ma[ma.length - 1]) - 8}" fill="#4FD1E8">10-yr mean</text>`;
   sr.values.forEach((y, i) => { g += `<circle class="dv-dot" cx="${X(xs[i]).toFixed(1)}" cy="${Y(y).toFixed(1)}" r="3.4" fill="#E4F3FB"/><rect class="dv-hit" x="${(X(xs[i]) - (W - L - R) / xs.length / 2).toFixed(1)}" y="${T}" width="${((W - L - R) / xs.length).toFixed(1)}" height="${H - T - B}" ${tipAttr(String(xs[i]), [[v.short, `${fmt(y, d)} ${v.unit}`], ...(t ? [['trend line', `${fmt(t.intercept + t.slope * xs[i], d)} ${v.unit}`]] : []), ...(ma && ma[i] != null ? [['10-year mean', `${fmt(ma[i], d)} ${v.unit}`]] : [])])}/>`; });
